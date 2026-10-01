@@ -5,10 +5,12 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const spec = b.option([]const u8, "spec", "ITI DSL file embedded and parsed at comptime") orelse "../examples/login.iti";
     const profile = b.option([]const u8, "profile", "Test profile: minimal|standard|data|performance|full") orelse "standard";
+    const ui = b.option([]const u8, "ui", "Output projection: ndjson|tui") orelse "tui";
 
     const options = b.addOptions();
     options.addOption([]const u8, "spec", spec);
     options.addOption([]const u8, "profile", profile);
+    options.addOption([]const u8, "ui", ui);
 
     const exe = b.addExecutable(.{
         .name = "iti",
