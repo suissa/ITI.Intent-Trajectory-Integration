@@ -1,13 +1,17 @@
-const std = @import("std");
 const dsl = @import("dsl.zig");
 const profile_mod = @import("profile.zig");
 const trajectory = @import("trajectory.zig");
 
-pub fn run(comptime source: []const u8, comptime profile_name: []const u8) void {
+pub fn run(
+    comptime source: []const u8,
+    comptime profile_name: []const u8,
+    comptime ui_name: []const u8,
+) void {
     const spec = comptime dsl.parse(source);
     const profile = comptime profile_mod.fromName(profile_name);
+    const projection = comptime trajectory.Projection.fromName(ui_name);
 
-    var out = trajectory.Console{};
+    var out = trajectory.Console{ .projection = projection };
     const trajectory_name = "iti.intent-trajectory";
 
     out.emit(.{
@@ -106,31 +110,13 @@ fn emitSelectedProbes(out: *trajectory.Console, profile: profile_mod.TestSet, na
 }
 
 fn probe(out: *trajectory.Console, trajectory_name: []const u8, name: []const u8) void {
-    out.emit(.{
-        .kind = .expansion,
-        .trajectory = trajectory_name,
-        .track = name,
-        .name = "selected",
-        .status = .observed,
-    });
+    out.emit(.{ .kind = .expansion, .trajectory = trajectory_name, .track = name, .name = "selected", .status = .observed });
 }
 
 fn data(out: *trajectory.Console, trajectory_name: []const u8, name: []const u8) void {
-    out.emit(.{
-        .kind = .data_probe,
-        .trajectory = trajectory_name,
-        .track = name,
-        .name = "selected",
-        .status = .observed,
-    });
+    out.emit(.{ .kind = .data_probe, .trajectory = trajectory_name, .track = name, .name = "selected", .status = .observed });
 }
 
 fn performance(out: *trajectory.Console, trajectory_name: []const u8, name: []const u8) void {
-    out.emit(.{
-        .kind = .benchmark_sample,
-        .trajectory = trajectory_name,
-        .track = name,
-        .name = "selected",
-        .status = .observed,
-    });
+    out.emit(.{ .kind = .benchmark_sample, .trajectory = trajectory_name, .track = name, .name = "selected", .status = .observed });
 }
