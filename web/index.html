@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ITI Dashboard</title>
+<style>
+:root{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#e9eef5;background:#0a0d12}
+*{box-sizing:border-box}body{margin:0}.app{display:grid;grid-template-columns:280px 1fr;min-height:100vh}
+aside{border-right:1px solid #232a35;padding:20px}main{padding:20px}.brand{font-weight:700;font-size:20px}.muted{color:#8792a2}
+.status{margin-top:8px}.ok{color:#78dba9}.fail{color:#ff7a88}.running{color:#7bc7ff}
+.card{border:1px solid #232a35;border-radius:10px;padding:14px;margin:10px 0;background:#10151d}
+.track{display:grid;grid-template-columns:28px 220px 1fr 110px;gap:8px;align-items:center}
+.event{font-size:12px;color:#9aa7b8;white-space:pre-wrap}.pill{border:1px solid #2c3542;border-radius:999px;padding:3px 8px;font-size:11px}
+header{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #232a35;padding-bottom:14px}
+</style>
+</head>
+<body>
+<div class="app">
+<aside>
+<div class="brand">ITI</div>
+<div class="muted">Intent Trajectory Integration</div>
+<div id="connection" class="status running">connecting…</div>
+<hr style="border:0;border-top:1px solid #232a35;margin:18px 0">
+<div class="muted">Trajectory</div><div id="trajectory">—</div>
+<div class="muted" style="margin-top:14px">Profile</div><div id="profile">—</div>
+</aside>
+<main>
+<header><div><strong>Live Intent Trajectory</strong><div class="muted">same event stream as the TUI</div></div><span class="pill">WebSocket :7331</span></header>
+<div id="tracks"></div>
+</main>
+</div>
+<script>
+const connection=document.querySelector('#connection');
+const trajectory=document.querySelector('#trajectory');
+const profile=document.querySelector('#profile');
+const tracks=document.querySelector('#tracks');
+const ws=new WebSocket('ws://'+(location.hostname||'127.0.0.1')+':7331');
+ws.onopen=()=>{connection.textContent='connected';connection.className='status ok';};
+ws.onclose=()=>{connection.textContent='disconnected';connection.className='status fail';};
+ws.onerror=()=>{connection.textContent='websocket unavailable';connection.className='status fail';};
+ws.onmessage=({data})=>{
+  const e=JSON.parse(data);
+  trajectory.textContent=e.trajectory||'—';
+  if(e.kind==='run_started')profile.textContent=e.name||'—';
+  const card=document.createElement('div');
+  card.className='card track';
+  const icon=e.status==='passed'?'✓':e.status==='failed'?'✗':e.status==='observed'?'↳':'●';
+  card.innerHTML='<span>'+icon+'</span><strong>'+(e.track||e.kind)+'</strong><span class="event">'+(e.name||'')+'</span><span class="pill">'+e.kind+'</span>';
+  tracks.prepend(card);
+};
+</script>
+</body>
+</html>
