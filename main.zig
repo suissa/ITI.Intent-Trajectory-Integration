@@ -7,17 +7,17 @@ const runner = @import("src/runner.zig");
 
 const source = @embedFile(build_options.spec);
 
-const parsed_spec = comptime blk: {
+const parsed_spec = blk: {
     @setEvalBranchQuota(100_000);
     break :blk dsl.parse(source);
 };
 
-const selected_profile = comptime blk: {
+const selected_profile = blk: {
     @setEvalBranchQuota(10_000);
     break :blk profile.fromName(build_options.profile);
 };
 
-const selected_projection = comptime trajectory.Projection.fromName(build_options.ui);
+const selected_projection = trajectory.Projection.fromName(build_options.ui);
 
 pub fn main() void {
     std.debug.print(
