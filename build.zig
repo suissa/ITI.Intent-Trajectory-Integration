@@ -21,7 +21,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addOptions("build_options", options);
     b.installArtifact(exe);
 
-    const run_cmd = exe.run();
+    const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| run_cmd.addArgs(args);
 
@@ -35,7 +35,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
-    const run_unit_tests = unit_tests.run();
+    const run_unit_tests = b.addRunArtifact(unit_tests);
 
     const test_step = b.step("test", "Run ITI unit tests");
     test_step.dependOn(&run_unit_tests.step);
