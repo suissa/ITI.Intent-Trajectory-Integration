@@ -1,19 +1,29 @@
 const std = @import("std");
 const build_options = @import("build_options");
+const dsl = @import("src/dsl.zig");
+const profile = @import("src/profile.zig");
+const trajectory = @import("src/trajectory.zig");
 const runner = @import("src/runner.zig");
 
 const source = @embedFile(build_options.spec);
 
-comptime {
-    _ = @import("src/dsl.zig").parse(source);
-    _ = @import("src/profile.zig").fromName(build_options.profile);
-    _ = @import("src/trajectory.zig").Projection.fromName(build_options.ui);
-}
+const parsed_spec = comptime blk: {
+    @setEvalBranchQuota(100_000);
+    break :blk dsl.parse(source);
+};
+
+const selected_profile = comptime blk: {
+    @setEvalBranchQuota(10_000);
+    break :blk profile.fromName(build_options.profile);
+};
+
+const selected_projection = comptime trajectory.Projection.fromName(build_options.ui);
 
 pub fn main() void {
     std.debug.print(
         "ITI — Intent Trajectory Integration\nSpec: {s}\nProfile: {s}\nUI: {s}\n\n",
         .{ build_options.spec, build_options.profile, build_options.ui },
     );
-    runner.run(source, build_options.profile, build_options.ui);
+
+    runner.runParsed(parsed_spec, selected_profile, selected_projection, build_options.profile);
 }
