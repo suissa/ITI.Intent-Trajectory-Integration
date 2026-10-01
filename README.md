@@ -67,7 +67,7 @@ zig build run
 Run another embedded DSL and profile:
 
 ```bash
-zig build run -Dspec=../examples/purchase.iti -Dprofile=full
+zig build run -Dspec=../examples/purchase.iti -Dprofile=full -Dui=tui
 ```
 
 Profiles:
@@ -125,7 +125,7 @@ Implemented:
 - compile-time test profiles.
 - `full` profile covering intent/unit/integration/E2E/data/performance/discovery selection.
 - OpenTrajectory-compatible Trajectory / Track / Expansion event model.
-- append-only NDJSON output suitable for realtime consumers.
+- append-only NDJSON output suitable for realtime consumers.\n- terminal projection using the same Trajectory event stream.\n- Web Dashboard shell in `web/index.html`, ready to consume the same events over WebSocket.
 - DSL parser tests.
 
-Next adapters are documented in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): Lightpanda CDP execution, WebSocket hub, TUI, Web Dashboard, OpenTrajectory exporter, and concrete data-plane probes.
+Next runtime adapters are documented in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): real Lightpanda CDP execution, WebSocket server, OpenTrajectory exporter, and concrete data-plane probes.
