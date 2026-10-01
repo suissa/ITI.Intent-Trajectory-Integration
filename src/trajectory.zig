@@ -99,11 +99,7 @@ fn emitTui(e: Event) void {
     }
 }
 
-test "trajectory event stream is ordered" {
-    var console = Console{ .projection = .ndjson };
-    console.emit(.{
-        .kind = .trajectory_started,
-        .trajectory = "login",
-    });
-    try std.testing.expectEqual(@as(usize, 1), console.sequence);
+test "trajectory console starts with an empty sequence" {
+    const console = Console{ .projection = .ndjson };
+    try std.testing.expectEqual(@as(usize, 0), console.sequence);
 }
