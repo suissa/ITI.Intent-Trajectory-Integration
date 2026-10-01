@@ -32,7 +32,7 @@ pub fn parse(comptime source: []const u8) Parsed(countSteps(source)) {
     var start: usize = 0;
 
     while (start <= source.len) {
-        const end = std.mem.indexOfScalarPos(u8, source, start, '\n') orelse source.len;
+        const end = findByteFrom(source, start, '\n') orelse source.len;
         const line = std.mem.trim(u8, source[start..end], " \t\r");
 
         if (line.len != 0 and line[0] != '#') {
@@ -52,7 +52,7 @@ fn countSteps(comptime source: []const u8) usize {
     var start: usize = 0;
 
     while (start <= source.len) {
-        const end = std.mem.indexOfScalarPos(u8, source, start, '\n') orelse source.len;
+        const end = findByteFrom(source, start, '\n') orelse source.len;
         const line = std.mem.trim(u8, source[start..end], " \t\r");
         if (line.len != 0 and line[0] != '#') count += 1;
         if (end == source.len) break;
@@ -65,7 +65,7 @@ fn countSteps(comptime source: []const u8) usize {
 fn parseLine(comptime line: []const u8) Step {
     if (std.mem.startsWith(u8, line, "AS ")) {
         const rest = line[3..];
-        const sep = std.mem.indexOfScalar(u8, rest, ' ') orelse
+        const sep = findByte(rest, ' ') orelse
             @compileError("ITI: AS requires actor type and identifier");
         return .{
             .kind = .actor,
@@ -102,7 +102,7 @@ fn parseLine(comptime line: []const u8) Step {
     if (std.mem.startsWith(u8, line, "I TYPE ")) {
         const body = line[7..];
         const marker = " INTO ";
-        const sep = std.mem.indexOf(u8, body, marker) orelse
+        const sep = findSlice(body, marker) orelse
             @compileError("ITI: I TYPE requires INTO");
         return .{
             .kind = .type_into,
@@ -119,6 +119,29 @@ fn simple(comptime kind: StepKind, comptime raw: []const u8, comptime object: []
     const trimmed = std.mem.trim(u8, object, " ");
     if (trimmed.len == 0) @compileError("ITI: statement requires a value: " ++ raw);
     return .{ .kind = kind, .raw = raw, .object = trimmed };
+}
+
+fn findByte(comptime haystack: []const u8, comptime needle: u8) ?usize {
+    return findByteFrom(haystack, 0, needle);
+}
+
+fn findByteFrom(comptime haystack: []const u8, comptime start: usize, comptime needle: u8) ?usize {
+    var i = start;
+    while (i < haystack.len) : (i += 1) {
+        if (haystack[i] == needle) return i;
+    }
+    return null;
+}
+
+fn findSlice(comptime haystack: []const u8, comptime needle: []const u8) ?usize {
+    if (needle.len == 0) return 0;
+    if (needle.len > haystack.len) return null;
+
+    var i: usize = 0;
+    while (i + needle.len <= haystack.len) : (i += 1) {
+        if (std.mem.eql(u8, haystack[i .. i + needle.len], needle)) return i;
+    }
+    return null;
 }
 
 test "parses natural browser behavior at comptime" {
