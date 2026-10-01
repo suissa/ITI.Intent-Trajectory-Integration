@@ -67,7 +67,7 @@ zig build run
 Run another embedded DSL and profile:
 
 ```bash
-zig build run -Dspec=../examples/purchase.iti -Dprofile=full -Dui=tui
+zig build run -Dspec=examples/purchase.iti -Dprofile=full -Dui=tui
 ```
 
 Profiles:
@@ -108,7 +108,7 @@ discovery.semantic
 
 ## Compile-time guarantees
 
-The specification is loaded through `@embedFile` and parsed during compilation. Unknown statements produce `@compileError`.
+The executable package root is the repository root, so specifications under the project (for example `examples/login.iti`) can be loaded through `@embedFile` and parsed during compilation. Unknown statements produce `@compileError`.
 
 This means a malformed static ITI behavior cannot silently reach the runner.
 
