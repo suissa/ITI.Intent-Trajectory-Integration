@@ -3,7 +3,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const spec = b.option([]const u8, "spec", "ITI DSL file embedded and parsed at comptime") orelse "../examples/login.iti";
+    const spec = b.option([]const u8, "spec", "ITI DSL file embedded and parsed at comptime") orelse "examples/login.iti";
     const profile = b.option([]const u8, "profile", "Test profile: minimal|standard|data|performance|full") orelse "standard";
     const ui = b.option([]const u8, "ui", "Output projection: ndjson|tui") orelse "tui";
 
@@ -15,7 +15,7 @@ pub fn build(b: *std.Build) void {
     const exe = b.addExecutable(.{
         .name = "iti",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
+            .root_source_file = b.path("main.zig"),
             .target = target,
             .optimize = optimize,
         }),
