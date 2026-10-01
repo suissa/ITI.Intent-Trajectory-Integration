@@ -1,0 +1,11 @@
+# Intent-to-Action example
+AS Human $customer
+
+I OPEN Products
+I TYPE "Xiomi cellphone" INTO Search
+I CLICK Search
+
+I HOPE SEE "Xiaomi Redmi Note 15"
+I WISH buy Product
+WITH payment PIX
+I HOPE receive PIX

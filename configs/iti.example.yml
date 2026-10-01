@@ -1,0 +1,36 @@
+profile: full
+
+runtime:
+  browser: lightpanda
+  cdp: http://127.0.0.1:9222
+  realtime: websocket
+
+tests:
+  intent: true
+  unit: true
+  integration: true
+  e2e: true
+  semantic: true
+
+  data:
+    write: true
+    read: true
+    cache: true
+    search: true
+    vector: true
+    graph: true
+    events: true
+
+  performance:
+    benchmark: true
+    load: true
+    stress: true
+
+  discovery:
+    graph: true
+    semantic: true
+
+observability:
+  trajectory: true
+  ndjson: true
+  websocket: true

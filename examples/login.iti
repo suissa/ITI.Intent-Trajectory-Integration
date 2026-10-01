@@ -1,0 +1,9 @@
+# ITI natural behavior example
+AS Human $customer
+
+I OPEN Login
+I TYPE $customer.email INTO Email
+I TYPE $customer.password INTO Password
+I CLICK Login
+
+I HOPE SEE Dashboard
