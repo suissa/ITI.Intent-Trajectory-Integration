@@ -1,1 +1,5 @@
-(empty)
+# Zig build cache
+.zig-cache/
+
+# Dependencies/Vendor (if generated or managed externally)
+vendor/
