@@ -1,5 +1,6 @@
-# Zig build cache
+# Zig build artifacts
 .zig-cache/
+zig-out/
 
-# Dependencies/Vendor (if generated or managed externally)
+# Vendor dependencies (if generated)
 vendor/
