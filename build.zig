@@ -29,6 +29,23 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("tui", tui_dep.module("tui"));
     b.installArtifact(exe);
 
+    // Deterministic build-error healer. It intentionally depends only on std so
+    // it can be built even when the TUI dependency itself is the failure.
+    const healer_exe = b.addExecutable(.{
+        .name = "zighealer",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("zighealer.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    b.installArtifact(healer_exe);
+
+    const healer_run = b.addRunArtifact(healer_exe);
+    if (b.args) |args| healer_run.addArgs(args);
+    const healer_step = b.step("zighealer", "Build and optionally run the deterministic build healer");
+    healer_step.dependOn(&healer_run.step);
+
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| run_cmd.addArgs(args);
