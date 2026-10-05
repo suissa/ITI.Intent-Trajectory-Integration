@@ -570,7 +570,7 @@ pub const Dashboard = struct {
 
     fn renderBody(sub: *tui.SubScreen, self: *Dashboard, w: u16, h: u16) void {
         const body_top: u16 = 2;
-        const body_bottom: u16 = h - 2; // footer occupies last two rows
+        const body_bottom: u16 = h - 3; // footer occupies controls + progress rows
 
         // Row 1: test navigation grid.
         const nav_y = body_top;
