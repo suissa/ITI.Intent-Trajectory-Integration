@@ -22,7 +22,7 @@ const selected_projection = trajectory.Projection.fromName(build_options.ui);
 
 pub fn main() !void {
     std.debug.print(
-        "ITI — Intent Trajectory Integration\\nSpec: {s}\\nProfile: {s}\\nUI: {s}\\n\\n",
+        "ITI — Intent Trajectory Integration\nSpec: {s}\nProfile: {s}\nUI: {s}\n\n",
         .{ build_options.spec, build_options.profile, build_options.ui },
     );
 
