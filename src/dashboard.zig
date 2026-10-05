@@ -91,7 +91,7 @@ pub fn buildSuite(
     return entries;
 }
 
-const ProbeDesc = struct { kind: trajectory.EventKind, name: []const u8 };
+pub const ProbeDesc = struct { kind: trajectory.EventKind, name: []const u8 };
 
 fn profile_probe_count(comptime profile: profile_mod.TestSet) usize {
     var count: usize = 0;
@@ -101,7 +101,7 @@ fn profile_probe_count(comptime profile: profile_mod.TestSet) usize {
     return count;
 }
 
-fn profile_probes(comptime profile: profile_mod.TestSet) [profile_probe_count(profile)]ProbeDesc {
+pub fn profileProbes(comptime profile: profile_mod.TestSet) [profile_probe_count(profile)]ProbeDesc {
     var out: [profile_probe_count(profile)]ProbeDesc = undefined;
     var index: usize = 0;
     inline for (@typeInfo(profile_mod.TestSet).@"struct".fields) |field| {
@@ -209,6 +209,8 @@ pub const Dashboard = struct {
     log_meta: [max_log_lines]LogLine = [_]LogLine{.{}} ** max_log_lines,
     log_count: usize = 0,
     log_scroll: usize = 0,
+    terminal_width: u16 = 0,
+    terminal_height: u16 = 0,
 
     hover_prev: bool = false,
     hover_next: bool = false,
@@ -485,11 +487,13 @@ pub const Dashboard = struct {
             .mouse => |me| {
                 switch (me.kind) {
                     .press => {
-                        if (hitPrev(me.x, me.y)) self.previous();
-                        if (hitNext(me.x, me.y)) self.next();
-                        if (hitExec(me.x, me.y)) self.execute();
-                        if (hitPause(me.x, me.y)) self.pause();
-                        if (hitStop(me.x, me.y)) self.stop();
+                        if (self.hitPrev(me.x, me.y)) self.previous();
+                        if (self.hitNext(me.x, me.y)) self.next();
+                        if (self.hitExec(me.x, me.y)) self.execute();
+                        if (self.hitPause(me.x, me.y)) {
+                            if (self.state == .paused) self.execute() else self.pause();
+                        }
+                        if (self.hitStop(me.x, me.y)) self.stop();
                         return .needs_redraw;
                     },
                     .release => return .needs_redraw,
@@ -499,11 +503,11 @@ pub const Dashboard = struct {
                         const exec_hover = self.hover_exec;
                         const pause_hover = self.hover_pause;
                         const stop_hover = self.hover_stop;
-                        self.hover_prev = hitPrev(me.x, me.y);
-                        self.hover_next = hitNext(me.x, me.y);
-                        self.hover_exec = hitExec(me.x, me.y);
-                        self.hover_pause = hitPause(me.x, me.y);
-                        self.hover_stop = hitStop(me.x, me.y);
+                        self.hover_prev = self.hitPrev(me.x, me.y);
+                        self.hover_next = self.hitNext(me.x, me.y);
+                        self.hover_exec = self.hitExec(me.x, me.y);
+                        self.hover_pause = self.hitPause(me.x, me.y);
+                        self.hover_stop = self.hitStop(me.x, me.y);
                         if (prev_hover != self.hover_prev or next_hover != self.hover_next or
                             exec_hover != self.hover_exec or pause_hover != self.hover_pause or
                             stop_hover != self.hover_stop) return .needs_redraw;
@@ -528,6 +532,8 @@ pub const Dashboard = struct {
     // ----- rendering ------------------------------------------------------------
 
     pub fn render(self: *Dashboard, ctx: *tui.RenderContext) void {
+        self.terminal_width = ctx.bounds.width;
+        self.terminal_height = ctx.bounds.height;
         var sub = ctx.getSubScreen();
         const w = sub.width;
         const h = sub.height;
@@ -564,7 +570,7 @@ pub const Dashboard = struct {
 
     fn renderBody(sub: *tui.SubScreen, self: *Dashboard, w: u16, h: u16) void {
         const body_top: u16 = 2;
-        const body_bottom: u16 = h - 2; // footer occupies last two rows
+        const body_bottom: u16 = h - 3; // footer occupies controls + progress rows
 
         // Row 1: test navigation grid.
         const nav_y = body_top;
@@ -578,19 +584,10 @@ pub const Dashboard = struct {
         drawButton(sub, left_x, nav_y, 4, "<", paused and self.current_test > 0, self.hover_prev, false);
         drawButton(sub, right_x, nav_y, 4, ">", paused and self.current_test + 1 < self.suite.len, self.hover_next, false);
 
-        // Central button: Executar hides while running; Pause/Stop appear instead.
-        switch (self.state) {
-            .running => {
-                drawButton(sub, center_x, nav_y, 7, "Pause", true, self.hover_pause, true);
-                drawButton(sub, center_x + 9, nav_y, 6, "Stop", true, self.hover_stop, false);
-            },
-            .paused => {
-                drawButton(sub, center_x, nav_y, 7, "Resume", true, self.hover_exec, true);
-                drawButton(sub, center_x + 9, nav_y, 6, "Stop", true, self.hover_stop, false);
-            },
-            else => {
-                drawButton(sub, center_x, nav_y, center_w, " Executar ", true, self.hover_exec, true);
-            },
+        // Executar stays in the body. While active, Pause/Stop move to
+        // the fixed footer below (renderFooter).
+        if (self.state != .running and self.state != .paused) {
+            drawButton(sub, center_x, nav_y, center_w, " Executar ", true, self.hover_exec, true);
         }
 
         // Row 2: current test + system state badges.
@@ -729,14 +726,28 @@ pub const Dashboard = struct {
     }
 
     fn renderFooter(sub: *tui.SubScreen, self: *Dashboard, w: u16, h: u16) void {
-        const y = h - 2;
-        sub.setStyle(.{ .fg = tui.Color.hex(0x6272A4), .bg = tui.Color.hex(0x282A36) });
-        sub.moveCursor(0, y);
-        sub.hline(0, y, w, '─');
-
+        const controls_y = h - 2;
         const bar_y = h - 1;
+
+        sub.setStyle(.{ .fg = tui.Color.hex(0x6272A4), .bg = tui.Color.hex(0x282A36) });
+        sub.moveCursor(0, controls_y);
+        sub.hline(0, controls_y, w, '─');
+
+        // When execution is active, the footer owns the two lifecycle controls.
+        if (self.state == .running or self.state == .paused) {
+            const pause_label: []const u8 = if (self.state == .paused) "Resume" else "Pause";
+            const pause_w: u16 = if (self.state == .paused) 8 else 7;
+            const stop_w: u16 = 6;
+            const gap: u16 = 2;
+            const total_w = pause_w + gap + stop_w;
+            const start_x = (w -| total_w) / 2;
+            drawButton(sub, start_x, controls_y, pause_w, pause_label, true, self.hover_pause or self.hover_exec, true);
+            drawButton(sub, start_x + pause_w + gap, controls_y, stop_w, "Stop", true, self.hover_stop, false);
+        }
+
         sub.setStyle(.{ .fg = tui.Color.hex(0x282A36), .bg = tui.Color.hex(0x44475A) });
-        sub.fill(' ');
+        sub.moveCursor(0, bar_y);
+        sub.hline(0, bar_y, w, ' ');
 
         const pct = self.progressPercentage();
         var label_buf: [96]u8 = undefined;
@@ -750,9 +761,8 @@ pub const Dashboard = struct {
         sub.moveCursor(0, bar_y);
         sub.putString(label);
 
-        // Progress bar filling the remaining width.
         const label_w: u16 = @intCast(@min(label.len, w));
-        const bar_w = w - label_w - 1;
+        const bar_w = w -| label_w -| 1;
         if (bar_w > 2) {
             const filled: u16 = @intFromFloat(@floor(@as(f32, @floatFromInt(bar_w)) * @as(f32, @floatFromInt(pct)) / 100.0));
             sub.setStyle(.{ .fg = tui.Color.hex(0x50FA7B), .bg = tui.Color.hex(0x282A36) });
@@ -772,25 +782,37 @@ pub const Dashboard = struct {
 
     // ----- layout hit-testing -----------------------------------------------------
 
-    fn hitPrev(x: u16, y: u16) bool {
-        return rectHit(x, y, 2, 0, 4, 1);
+    fn hitPrev(self: *Dashboard, x: u16, y: u16) bool {
+        _ = self;
+        return rectHit(x, y, 2, 2, 4, 1);
     }
 
-    fn hitNext(x: u16, y: u16) bool {
-        return rectHit(x, y, 2, 0, 4, 1);
+    fn hitNext(self: *Dashboard, x: u16, y: u16) bool {
+        return rectHit(x, y, self.terminal_width -| 6, 2, 4, 1);
     }
 
-    fn hitExec(x: u16, y: u16) bool {
-        return rectHit(x, y, 2, 0, 16, 1);
+    fn hitExec(self: *Dashboard, x: u16, y: u16) bool {
+        const center_w: u16 = 16;
+        const center_x = (self.terminal_width -| center_w) / 2;
+        return rectHit(x, y, center_x, 2, center_w, 1);
     }
 
-    fn hitPause(x: u16, y: u16) bool {
-        return rectHit(x, y, 2, 0, 7, 1);
+    fn hitPause(self: *Dashboard, x: u16, y: u16) bool {
+        if (self.state != .running and self.state != .paused) return false;
+        const pause_w: u16 = if (self.state == .paused) 8 else 7;
+        const total_w = pause_w + 2 + 6;
+        const start_x = (self.terminal_width -| total_w) / 2;
+        return rectHit(x, y, start_x, self.terminal_height -| 2, pause_w, 1);
     }
 
-    fn hitStop(x: u16, y: u16) bool {
-        return rectHit(x, y, 2, 0, 6, 1);
+    fn hitStop(self: *Dashboard, x: u16, y: u16) bool {
+        if (self.state != .running and self.state != .paused) return false;
+        const pause_w: u16 = if (self.state == .paused) 8 else 7;
+        const gap: u16 = 2;
+        const start_x = (self.terminal_width -| (pause_w + gap + 6)) / 2;
+        return rectHit(x, y, start_x + pause_w + gap, self.terminal_height -| 2, 6, 1);
     }
+
 };
 
 fn rectHit(px: u16, py: u16, x: u16, y: u16, w: u16, h: u16) bool {
