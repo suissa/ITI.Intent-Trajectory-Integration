@@ -774,6 +774,12 @@ pub const Dashboard = struct {
         }
     }
 
+    fn progressPercentage(self: *Dashboard) u8 {
+        if (self.total_events == 0) return 0;
+        const scaled: u64 = @as(u64, self.emitted_events) * 100;
+        return @intCast(@min(100, scaled / self.total_events));
+    }
+
     // ----- layout hit-testing -----------------------------------------------------
 
     fn hitPrev(self: *Dashboard, x: u16, y: u16) bool {
