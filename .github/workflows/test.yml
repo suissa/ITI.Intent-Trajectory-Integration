@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@v2
@@ -23,3 +25,6 @@ jobs:
 
       - name: Run tests
         run: zig build test
+
+      - name: Build zighealer
+        run: zig build zighealer
