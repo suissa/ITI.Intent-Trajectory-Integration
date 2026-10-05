@@ -41,10 +41,13 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(healer_exe);
 
+    const healer_step = b.step("zighealer", "Build the deterministic build healer");
+    healer_step.dependOn(&healer_exe.step);
+
     const healer_run = b.addRunArtifact(healer_exe);
     if (b.args) |args| healer_run.addArgs(args);
-    const healer_step = b.step("zighealer", "Build and optionally run the deterministic build healer");
-    healer_step.dependOn(&healer_run.step);
+    const heal_step = b.step("heal", "Run zighealer with the supplied build diagnostic");
+    heal_step.dependOn(&healer_run.step);
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
