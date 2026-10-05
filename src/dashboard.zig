@@ -487,9 +487,9 @@ pub const Dashboard = struct {
             .mouse => |me| {
                 switch (me.kind) {
                     .press => {
-                        if (hitPrev(me.x, me.y)) self.previous();
-                        if (hitNext(me.x, me.y)) self.next();
-                        if (hitExec(me.x, me.y)) self.execute();
+                        if (self.hitPrev(me.x, me.y)) self.previous();
+                        if (self.hitNext(me.x, me.y)) self.next();
+                        if (self.hitExec(me.x, me.y)) self.execute();
                         if (self.hitPause(me.x, me.y)) {
                             if (self.state == .paused) self.execute() else self.pause();
                         }
@@ -503,9 +503,9 @@ pub const Dashboard = struct {
                         const exec_hover = self.hover_exec;
                         const pause_hover = self.hover_pause;
                         const stop_hover = self.hover_stop;
-                        self.hover_prev = hitPrev(me.x, me.y);
-                        self.hover_next = hitNext(me.x, me.y);
-                        self.hover_exec = hitExec(me.x, me.y);
+                        self.hover_prev = self.hitPrev(me.x, me.y);
+                        self.hover_next = self.hitNext(me.x, me.y);
+                        self.hover_exec = self.hitExec(me.x, me.y);
                         self.hover_pause = self.hitPause(me.x, me.y);
                         self.hover_stop = self.hitStop(me.x, me.y);
                         if (prev_hover != self.hover_prev or next_hover != self.hover_next or
@@ -776,16 +776,19 @@ pub const Dashboard = struct {
 
     // ----- layout hit-testing -----------------------------------------------------
 
-    fn hitPrev(x: u16, y: u16) bool {
+    fn hitPrev(self: *Dashboard, x: u16, y: u16) bool {
+        _ = self;
         return rectHit(x, y, 2, 2, 4, 1);
     }
 
-    fn hitNext(x: u16, y: u16) bool {
-        return rectHit(x, y, 2, 2, 4, 1);
+    fn hitNext(self: *Dashboard, x: u16, y: u16) bool {
+        return rectHit(x, y, self.terminal_width -| 6, 2, 4, 1);
     }
 
-    fn hitExec(x: u16, y: u16) bool {
-        return rectHit(x, y, 2, 2, 16, 1);
+    fn hitExec(self: *Dashboard, x: u16, y: u16) bool {
+        const center_w: u16 = 16;
+        const center_x = (self.terminal_width -| center_w) / 2;
+        return rectHit(x, y, center_x, 2, center_w, 1);
     }
 
     fn hitPause(self: *Dashboard, x: u16, y: u16) bool {
