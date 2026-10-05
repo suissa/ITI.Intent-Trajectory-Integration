@@ -8,6 +8,11 @@
 //!     live signale-styled log stream of the real Trajectory event stream.
 //!   - Fixed footer: execution progress bar with percentage.
 //!   - Theme: dracula.
+//!
+//! Entry points:
+//!   - `zig build dashboard` runs this file's `main()` directly.
+//!   - `zig build run -Dui=tui ...` routes through `main.zig`, which calls
+//!     `dashboardMain()` here so the tests execute INSIDE the dashboard.
 
 const std = @import("std");
 const tui = @import("tui");
@@ -15,6 +20,9 @@ const tui = @import("tui");
 const dsl = @import("dsl.zig");
 const profile_mod = @import("profile.zig");
 const trajectory = @import("trajectory.zig");
+
+/// Path to the spec file embedded by `dashboardMain` when no `-Dspec` was given.
+const default_spec = "examples/login.iti";
 
 pub const SystemState = enum {
     idle,
@@ -65,26 +73,22 @@ pub const SuiteEntry = struct {
 };
 
 /// Builds the full dashboard suite at comptime from an embedded spec + profile.
+/// `steps` and `probes` must be comptime-known slices (their addresses are
+/// embedded directly into the returned slice, which lives in static memory).
 pub fn buildSuite(
-    comptime spec: anytype,
-    comptime profile: profile_mod.TestSet,
+    comptime steps: []const dsl.Step,
+    comptime probes: []const ProbeDesc,
     comptime spec_name: []const u8,
     comptime profile_name: []const u8,
 ) []const SuiteEntry {
-    var steps: [spec.steps.len]dsl.Step = undefined;
-    inline for (spec.steps, 0..) |step, i| steps[i] = step;
-
-    var probes: [profile_probe_count(profile)]ProbeDesc = undefined;
-    probes = profile_probes(profile);
-
-    var entries: [1]SuiteEntry = .{.{
+    const entries: []const SuiteEntry = &.{.{
         .name = spec_name ++ " · " ++ profile_name,
         .spec_name = spec_name,
         .profile_name = profile_name,
-        .steps = &steps,
-        .probes = &probes,
+        .steps = steps,
+        .probes = probes,
     }};
-    return &entries;
+    return entries;
 }
 
 const ProbeDesc = struct { kind: trajectory.EventKind, name: []const u8 };
@@ -118,6 +122,34 @@ fn profile_probes(comptime profile: profile_mod.TestSet) [profile_probe_count(pr
     return out;
 }
 
+/// Clips a UTF-8 string to at most `cells` terminal columns starting at byte
+/// offset `start`, honoring double-width codepoints. Pure function so it can be
+/// unit tested without a terminal.
+pub fn clipSegment(comptime src: []const u8, start: usize, cells: usize, max_w: usize) struct { text: []const u8, cells: usize } {
+    _ = max_w;
+    var taken: usize = 0;
+    var i: usize = @min(start, src.len);
+    const begin = i;
+    while (i < src.len) : (i += std.unicode.utf8ByteSequenceLength(src[i]) catch 1) {
+        const cp = std.unicode.utf8Decode(src[i .. i + (std.unicode.utf8ByteSequenceLength(src[i]) catch 1)]) catch break;
+        const cw: usize = if (cp >= 0x1100 and
+            (cp <= 0x115F or cp == 0x2329 or cp == 0x232A or
+                (cp >= 0x2E80 and cp <= 0xA4CF and cp != 0x303F) or
+                (cp >= 0xAC00 and cp <= 0xD7A3) or
+                (cp >= 0xF900 and cp <= 0xFAFF) or
+                (cp >= 0xFE10 and cp <= 0xFE19) or
+                (cp >= 0xFE30 and cp <= 0xFE6F) or
+                (cp >= 0xFF01 and cp <= 0xFF60) or
+                (cp >= 0xFFE0 and cp <= 0xFFE6)))
+            2
+        else
+            1;
+        if (taken + cw > cells) break;
+        taken += cw;
+    }
+    return .{ .text = src[begin..i], .cells = taken };
+}
+
 // ============================================
 // Log model (signale identity)
 // ============================================
@@ -149,10 +181,11 @@ pub const LogLine = struct {
 /// Renders one signale-flavored log line into `buf`, returning the slice written.
 /// Kept as a pure function so it can be unit tested without a terminal.
 pub fn formatLogLine(line: LogLine, buf: []u8) ![]u8 {
+    var tag_buf: [8]u8 = undefined;
     return std.fmt.bufPrint(
         buf,
         "{s} [{s:>5.5}] {s:<9.9} │ {s}",
-        .{ line.time[0..], upper(line.tag()), line.scopeText(), line.text() },
+        .{ line.time[0..], upperInto(line.tag(), &tag_buf), line.scopeText(), line.text() },
     );
 }
 
@@ -615,10 +648,11 @@ pub const Dashboard = struct {
         const msg_style = tui.Style{ .fg = tui.Color.hex(0xF8F8F2) };
 
         var row_buf: [log_line_len + 32]u8 = undefined;
+        var tag_buf: [8]u8 = undefined;
         const full = std.fmt.bufPrint(
             &row_buf,
             "{s} [{s:>5.5}] {s:<9.9} │ {s}",
-            .{ meta.time[0..], upper(meta.tag()), meta.scopeText(), meta.text() },
+            .{ meta.time[0..], upperInto(meta.tag(), &tag_buf), meta.scopeText(), meta.text() },
         ) catch "ITI log";
 
         // Column widths in cells: time(8) + " [" (2) + tag(5) + "] " (2) + scope(9) + " | " -> badge/scope offsets.
@@ -794,6 +828,43 @@ fn upperInto(src: []const u8, buf: []u8) []u8 {
     return buf[0..i];
 }
 
+/// Comptime-safe uppercase for short fixed tags (badges). For runtime strings
+/// the dashboard uses `upperInto` with a caller-provided buffer.
+fn upper(comptime src: []const u8) []const u8 {
+    comptime {
+        var buf: [src.len]u8 = undefined;
+        for (src, 0..) |c, i| buf[i] = std.ascii.toUpper(c);
+        return &buf;
+    }
+}
+
+/// Copies `src` into a fixed-size array field, tracking its length.
+fn copyBounded(src: []const u8, comptime buf: anytype, len: anytype) void {
+    comptime {
+        if (@TypeOf(buf).kind() != .pointer) @compileError("copyBounded expects a pointer to an array");
+    }
+    const n = @min(src.len, buf.len);
+    @memcpy(buf[0..n], src[0..n]);
+    len.* = @intCast(n);
+}
+
+fn copyBoundedSlice(src: []const u8, buf: []u8, len: *u16) void {
+    const n = @min(src.len, buf.len);
+    @memcpy(buf[0..n], src[0..n]);
+    len.* = @intCast(n);
+}
+
+/// Strips control characters so a malformed message cannot break the TUI grid.
+fn sanitize(src: []const u8, buf: []u8) []const u8 {
+    var n: usize = 0;
+    for (src) |c| {
+        if (n >= buf.len) break;
+        buf[n] = if (std.ascii.isControl(c)) ' ' else c;
+        n += 1;
+    }
+    return buf[0..n];
+}
+
 fn padRight(src: []const u8, buf: []u8) []u8 {
     var i: usize = 0;
     while (i < src.len and i < buf.len) : (i += 1) buf[i] = src[i];
@@ -901,6 +972,26 @@ pub fn run(suite: []const SuiteEntry, projection: trajectory.Projection) !void {
             next_frame = now;
         }
     }
+}
+
+// ============================================
+// Entry point — `zig build dashboard`
+// ============================================
+
+pub fn main() !void {
+    const build_options = @import("build_options");
+
+    const parsed_spec = blk: {
+        @setEvalBranchQuota(100_000);
+        break :blk dsl.parse(@embedFile(build_options.spec));
+    };
+    const selected_profile = blk: {
+        @setEvalBranchQuota(10_000);
+        break :blk profile_mod.fromName(build_options.profile);
+    };
+    const suite = buildSuite(parsed_spec, selected_profile, build_options.spec, build_options.profile);
+
+    try run(suite, .tui);
 }
 
 // ============================================
