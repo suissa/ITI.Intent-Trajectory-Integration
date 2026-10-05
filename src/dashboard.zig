@@ -91,7 +91,7 @@ pub fn buildSuite(
     return entries;
 }
 
-const ProbeDesc = struct { kind: trajectory.EventKind, name: []const u8 };
+pub const ProbeDesc = struct { kind: trajectory.EventKind, name: []const u8 };
 
 fn profile_probe_count(comptime profile: profile_mod.TestSet) usize {
     var count: usize = 0;
@@ -506,8 +506,8 @@ pub const Dashboard = struct {
                         self.hover_prev = hitPrev(me.x, me.y);
                         self.hover_next = hitNext(me.x, me.y);
                         self.hover_exec = hitExec(me.x, me.y);
-                        self.hover_pause = hitPause(me.x, me.y);
-                        self.hover_stop = hitStop(me.x, me.y);
+                        self.hover_pause = self.hitPause(me.x, me.y);
+                        self.hover_stop = self.hitStop(me.x, me.y);
                         if (prev_hover != self.hover_prev or next_hover != self.hover_next or
                             exec_hover != self.hover_exec or pause_hover != self.hover_pause or
                             stop_hover != self.hover_stop) return .needs_redraw;
