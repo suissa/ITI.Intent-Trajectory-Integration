@@ -16,6 +16,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Fetch TUI dependency
+        run: |
+          git clone https://github.com/muhammad-fiaz/tui.zig.git vendor/tui
+          git -C vendor/tui checkout cce16fb4903ddf36177811777f41b0d0f85d58d0
+
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@v2
         with:
