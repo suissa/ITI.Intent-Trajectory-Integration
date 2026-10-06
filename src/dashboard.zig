@@ -1023,7 +1023,7 @@ pub fn main() !void {
 test "formatLogLine renders signale-style columns" {
     var buf: [220]u8 = undefined;
     const out = try formatLogLine(.{
-        .time = "12:34:56",
+        .time = "12:34:56".*,
         .level_tag = "info",
         .scope = "RUN",
         .message = "hello",
