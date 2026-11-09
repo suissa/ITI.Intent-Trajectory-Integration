@@ -1,6 +1,1 @@
-# Zig build artifacts
-.zig-cache/
-zig-out/
-
-# Vendor dependencies (if generated)
-vendor/
+(empty)

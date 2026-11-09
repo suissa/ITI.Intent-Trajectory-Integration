@@ -122,6 +122,9 @@ fn profile_probes(comptime profile: profile_mod.TestSet) [profile_probe_count(pr
     return out;
 }
 
+/// Screen-space rectangle used for mouse hit-testing of the body buttons.
+pub const Rect = struct { x: u16, y: u16, w: u16, h: u16 };
+
 /// Clips a UTF-8 string to at most `cells` terminal columns starting at byte
 /// offset `start`, honoring double-width codepoints. Pure function so it can be
 /// unit tested without a terminal.
@@ -156,11 +159,11 @@ pub fn clipSegment(comptime src: []const u8, start: usize, cells: usize, max_w: 
 
 pub const LogLine = struct {
     time: [8]u8 = [_]u8{' '} ** 8,
-    level_tag: [8]u8 = undefined,
+    level_tag: [8]u8 = [_]u8{'.'} ** 8,
     tag_len: u8 = 0,
-    scope: [12]u8 = undefined,
+    scope: [12]u8 = [_]u8{' '} ** 12,
     scope_len: u8 = 0,
-    message: [log_line_len]u8 = undefined,
+    message: [log_line_len]u8 = [_]u8{' '} ** log_line_len,
     message_len: u16 = 0,
     color: tui.Color = tui.Color.hex(0xF8F8F2),
     bold: bool = false,
@@ -205,6 +208,16 @@ pub const Dashboard = struct {
     total_events: usize = 0,
     elapsed_ms: u64 = 0,
     last_tick_ns: i128 = 0,
+    last_emit_ns: i128 = 0,
+
+    // Layout rectangles (updated on every render) so mouse hit-testing uses
+    // the real button coordinates instead of hardcoded guesses.
+    layout_w: u16 = 80,
+    rect_prev: Rect = .{ .x = 2, .y = 2, .w = 4, .h = 1 },
+    rect_next: Rect = .{ .x = 74, .y = 2, .w = 4, .h = 1 },
+    rect_exec: Rect = .{ .x = 32, .y = 2, .w = 16, .h = 1 },
+    rect_pause: Rect = .{ .x = 32, .y = 2, .w = 7, .h = 1 },
+    rect_stop: Rect = .{ .x = 41, .y = 2, .w = 6, .h = 1 },
 
     log_meta: [max_log_lines]LogLine = [_]LogLine{.{}} ** max_log_lines,
     log_count: usize = 0,
@@ -244,8 +257,7 @@ pub const Dashboard = struct {
             return;
         }
         if (self.state == .stopped or self.state == .finished) {
-            self.emitted_events = 0;
-            self.elapsed_ms = 0;
+            self.resetRun();
         }
         self.state = .running;
         self.last_tick_ns = std.time.nanoTimestamp();
@@ -272,6 +284,7 @@ pub const Dashboard = struct {
             return;
         }
         self.current_test -= 1;
+        self.resetRun();
         self.pushSystem(.paused, "navegando para teste anterior · agora em {s}", .{self.selected().name});
     }
 
@@ -282,10 +295,25 @@ pub const Dashboard = struct {
             return;
         }
         self.current_test += 1;
+        self.resetRun();
         self.pushSystem(.paused, "navegando para próximo teste · agora em {s}", .{self.selected().name});
     }
 
+    /// Clears the run progress so the newly selected entry replays from zero.
+    fn resetRun(self: *Dashboard) void {
+        self.emitted_events = 0;
+        self.elapsed_ms = 0;
+        self.last_emit_ns = 0;
+    }
+
     // ----- runner integration --------------------------------------------------
+
+    /// Number of trajectory events produced by one suite entry:
+    /// run_started + trajectory_started + 3*steps + probes +
+    /// trajectory_finished + run_finished.
+    fn eventsForEntry(entry: SuiteEntry) usize {
+        return entry.steps.len * 3 + entry.probes.len + 4;
+    }
 
     /// Emits the next pending trajectory event of the selected test through the
     /// shared Console projection AND mirrors it into the dashboard log stream.
@@ -295,21 +323,12 @@ pub const Dashboard = struct {
         const probes = entry.probes;
         const trajectory_name = "iti.intent-trajectory";
 
-        const track_started_count = steps.len;
-        const expansion_assert_count = steps.len;
-        const track_finished_count = steps.len;
-        const probes_count = probes.len;
-        const per_test = track_started_count + expansion_assert_count + track_finished_count + probes_count + 4;
+        // The runner only ever executes the currently selected entry; its
+        // emitted counter is reset whenever the selection changes.
+        const per_test = eventsForEntry(entry);
+        if (self.emitted_events >= per_test) return false;
 
-        var test_index: usize = 0;
-        var base: usize = 0;
-        while (test_index < self.suite.len) : (test_index += 1) {
-            if (base + per_test > self.emitted_events) break;
-            base += per_test;
-        }
-        if (base + per_test <= self.emitted_events) return false;
-
-        const i = self.emitted_events - base;
+        const i = self.emitted_events;
         const step_index = if (i < 3 * steps.len) (i / 3) else null;
         const phase = if (i < 3 * steps.len) (i % 3) else 0;
 
@@ -358,7 +377,7 @@ pub const Dashboard = struct {
                     });
                 },
             }
-        } else if (i >= 3 * steps.len and i < 3 * steps.len + probes_count) {
+        } else if (i >= 3 * steps.len and i < 3 * steps.len + probes.len) {
             const pi = i - 3 * steps.len;
             const probe = probes[pi];
             const label = switch (probe.kind) {
@@ -374,10 +393,10 @@ pub const Dashboard = struct {
                 .name = "selected",
                 .status = .observed,
             });
-        } else if (i == 3 * steps.len + probes_count) {
+        } else if (i == 3 * steps.len + probes.len) {
             self.log(.info, "TRJ", "trajectory_finished", trajectory_name, tui.Color.hex(0x50FA7B));
             out.emit(.{ .kind = .trajectory_finished, .trajectory = trajectory_name, .status = .passed });
-        } else if (i == 3 * steps.len + probes_count + 1) {
+        } else if (i == 3 * steps.len + probes.len + 1) {
             self.log(.success, "RUN", "run_finished", entry.name, tui.Color.hex(0x50FA7B));
             out.emit(.{ .kind = .run_finished, .trajectory = trajectory_name, .status = .passed });
         } else {
@@ -385,7 +404,7 @@ pub const Dashboard = struct {
         }
 
         self.emitted_events += 1;
-        if (self.emitted_events >= self.total_events) {
+        if (self.emitted_events >= per_test) {
             self.state = .finished;
             self.pushSystem(.finished, "todos os eventos do fluxo foram observados · 100%", .{});
         }
@@ -484,26 +503,27 @@ pub const Dashboard = struct {
             },
             .mouse => |me| {
                 switch (me.kind) {
-                    .press => {
-                        if (hitPrev(me.x, me.y)) self.previous();
-                        if (hitNext(me.x, me.y)) self.next();
-                        if (hitExec(me.x, me.y)) self.execute();
-                        if (hitPause(me.x, me.y)) self.pause();
-                        if (hitStop(me.x, me.y)) self.stop();
-                        return .needs_redraw;
+                    .press, .release => {
+                        const before = self.state;
+                        const before_test = self.current_test;
+                        if (hitRect(me.x, me.y, self.rect_prev)) self.previous();
+                        else if (hitRect(me.x, me.y, self.rect_next)) self.next();
+                        else if (hitRect(me.x, me.y, self.rect_exec)) self.execute();
+                        else if (hitRect(me.x, me.y, self.rect_pause)) self.pause();
+                        else if (hitRect(me.x, me.y, self.rect_stop)) self.stop();
+                        if (self.state != before or self.current_test != before_test) return .needs_redraw;
                     },
-                    .release => return .needs_redraw,
                     .move => {
                         const prev_hover = self.hover_prev;
                         const next_hover = self.hover_next;
                         const exec_hover = self.hover_exec;
                         const pause_hover = self.hover_pause;
                         const stop_hover = self.hover_stop;
-                        self.hover_prev = hitPrev(me.x, me.y);
-                        self.hover_next = hitNext(me.x, me.y);
-                        self.hover_exec = hitExec(me.x, me.y);
-                        self.hover_pause = hitPause(me.x, me.y);
-                        self.hover_stop = hitStop(me.x, me.y);
+                        self.hover_prev = hitRect(me.x, me.y, self.rect_prev);
+                        self.hover_next = hitRect(me.x, me.y, self.rect_next);
+                        self.hover_exec = hitRect(me.x, me.y, self.rect_exec);
+                        self.hover_pause = hitRect(me.x, me.y, self.rect_pause);
+                        self.hover_stop = hitRect(me.x, me.y, self.rect_stop);
                         if (prev_hover != self.hover_prev or next_hover != self.hover_next or
                             exec_hover != self.hover_exec or pause_hover != self.hover_pause or
                             stop_hover != self.hover_stop) return .needs_redraw;
@@ -538,7 +558,7 @@ pub const Dashboard = struct {
         sub.clear();
 
         renderHeader(&sub, w);
-        renderBody(&sub, self, w, h);
+        renderBody(self, &sub, w, h);
         renderFooter(&sub, self, w, h);
     }
 
@@ -562,16 +582,21 @@ pub const Dashboard = struct {
         sub.hline(0, 1, w, '─');
     }
 
-    fn renderBody(sub: *tui.SubScreen, self: *Dashboard, w: u16, h: u16) void {
+    fn renderBody(self: *Dashboard, sub: *tui.SubScreen, w: u16, h: u16) void {
+        self.layout_w = w;
         const body_top: u16 = 2;
         const body_bottom: u16 = h - 2; // footer occupies last two rows
 
         // Row 1: test navigation grid.
         const nav_y = body_top;
         const left_x: u16 = 2;
-        const right_x: u16 = w - 6;
+        const right_x: u16 = w -| 6;
         const center_w: u16 = 16;
-        const center_x: u16 = (w - center_w) / 2;
+        const center_x: u16 = (w -| center_w) / 2;
+
+        // Publish hit-test rectangles for the mouse handlers.
+        self.rect_prev = .{ .x = left_x, .y = nav_y, .w = 4, .h = 1 };
+        self.rect_next = .{ .x = right_x, .y = nav_y, .w = 4, .h = 1 };
 
         const paused = self.state == .paused;
 
@@ -581,14 +606,23 @@ pub const Dashboard = struct {
         // Central button: Executar hides while running; Pause/Stop appear instead.
         switch (self.state) {
             .running => {
+                self.rect_exec = .{ .x = 0, .y = 0, .w = 0, .h = 0 };
+                self.rect_pause = .{ .x = center_x, .y = nav_y, .w = 7, .h = 1 };
+                self.rect_stop = .{ .x = center_x +| 9, .y = nav_y, .w = 6, .h = 1 };
                 drawButton(sub, center_x, nav_y, 7, "Pause", true, self.hover_pause, true);
                 drawButton(sub, center_x + 9, nav_y, 6, "Stop", true, self.hover_stop, false);
             },
             .paused => {
+                self.rect_exec = .{ .x = center_x, .y = nav_y, .w = 7, .h = 1 };
+                self.rect_pause = .{ .x = 0, .y = 0, .w = 0, .h = 0 };
+                self.rect_stop = .{ .x = center_x +| 9, .y = nav_y, .w = 6, .h = 1 };
                 drawButton(sub, center_x, nav_y, 7, "Resume", true, self.hover_exec, true);
                 drawButton(sub, center_x + 9, nav_y, 6, "Stop", true, self.hover_stop, false);
             },
             else => {
+                self.rect_exec = .{ .x = center_x, .y = nav_y, .w = center_w, .h = 1 };
+                self.rect_pause = .{ .x = 0, .y = 0, .w = 0, .h = 0 };
+                self.rect_stop = .{ .x = 0, .y = 0, .w = 0, .h = 0 };
                 drawButton(sub, center_x, nav_y, center_w, " Executar ", true, self.hover_exec, true);
             },
         }
@@ -613,8 +647,8 @@ pub const Dashboard = struct {
             sub.setStyle(.{ .fg = tui.Color.hex(0x6272A4) });
             sub.hline(1, panel_top, w - 2, '─');
             sub.hline(1, panel_bottom, w - 2, '─');
-            sub.vline(1, panel_top + 1, panel_bottom - panel_top - 1, '│');
-            sub.vline(w - 2, panel_top + 1, panel_bottom - panel_top - 1, '│');
+            sub.vline(1, panel_top + 1, panel_bottom -| panel_top -| 1, '│');
+            sub.vline(w -| 2, panel_top + 1, panel_bottom -| panel_top -| 1, '│');
 
             const title = " ── LOGS · signale ─────────────────────────── ";
             sub.setStyle(.{ .fg = tui.Color.hex(0xBD93F9), .attrs = .{ .bold = true } });
@@ -735,8 +769,9 @@ pub const Dashboard = struct {
         sub.hline(0, y, w, '─');
 
         const bar_y = h - 1;
-        sub.setStyle(.{ .fg = tui.Color.hex(0x282A36), .bg = tui.Color.hex(0x44475A) });
-        sub.fill(' ');
+        // Paint only the footer row (not the whole screen!) as the bar track.
+        sub.setStyle(.{ .fg = tui.Color.hex(0xF8F8F2), .bg = tui.Color.hex(0x44475A) });
+        sub.hline(0, bar_y, w, ' ');
 
         const pct = self.progressPercentage();
         var label_buf: [96]u8 = undefined;
@@ -771,31 +806,13 @@ pub const Dashboard = struct {
     }
 
     // ----- layout hit-testing -----------------------------------------------------
+    // The rectangles are refreshed by `renderBody` on every frame, so clicks and
+    // hover always use the real on-screen button coordinates.
 
-    fn hitPrev(x: u16, y: u16) bool {
-        return rectHit(x, y, 2, 0, 4, 1);
-    }
-
-    fn hitNext(x: u16, y: u16) bool {
-        return rectHit(x, y, 2, 0, 4, 1);
-    }
-
-    fn hitExec(x: u16, y: u16) bool {
-        return rectHit(x, y, 2, 0, 16, 1);
-    }
-
-    fn hitPause(x: u16, y: u16) bool {
-        return rectHit(x, y, 2, 0, 7, 1);
-    }
-
-    fn hitStop(x: u16, y: u16) bool {
-        return rectHit(x, y, 2, 0, 6, 1);
+    fn hitRect(x: u16, y: u16, r: Rect) bool {
+        return x >= r.x and x < r.x + r.w and y >= r.y and y < r.y + r.h;
     }
 };
-
-fn rectHit(px: u16, py: u16, x: u16, y: u16, w: u16, h: u16) bool {
-    return px >= x and px < x + w and py >= y and py < y + h;
-}
 
 fn drawButton(sub: *tui.SubScreen, x: u16, y: u16, w: u16, label: []const u8, enabled: bool, hovered: bool, primary: bool) void {
     _ = w;
@@ -817,7 +834,9 @@ fn drawButton(sub: *tui.SubScreen, x: u16, y: u16, w: u16, label: []const u8, en
 
     sub.setStyle(.{ .fg = fg_color, .bg = bg_color, .attrs = .{ .bold = true } });
     sub.moveCursor(x, y);
-    sub.putString("[" ++ label ++ "]");
+    var buf: [40]u8 = undefined;
+    const text = std.fmt.bufPrint(&buf, "[{s}]", .{label}) catch label;
+    sub.putString(text);
 }
 
 fn upperInto(src: []const u8, buf: []u8) []u8 {
@@ -874,7 +893,7 @@ fn padRight(src: []const u8, buf: []u8) []u8 {
 
 fn timestampInto(buf: *[8]u8) []const u8 {
     const ts = std.time.timestamp();
-    const tm = std.time.gmtime(&ts);
+    const tm = std.time.gmtime(ts);
     const hh = tm.hour;
     const mm = tm.min;
     const ss = tm.sec;
@@ -909,10 +928,11 @@ pub fn run(suite: []const SuiteEntry, projection: trajectory.Projection) !void {
     defer rend.deinit();
 
     var reader = tui.input.InputReader.init(allocator);
-    _ = &reader;
 
     var dash = Dashboard.init(suite);
     var console = trajectory.Console{ .projection = projection };
+    _ = &reader;
+    _ = &console;
 
     const theme = tui.theme.Theme.dracula;
     _ = theme;
@@ -944,11 +964,15 @@ pub fn run(suite: []const SuiteEntry, projection: trajectory.Projection) !void {
             }
         }
 
-        // Advance the real runner while the system is RUNNING.
+        // Advance the real runner while the system is RUNNING — one trajectory
+        // event every ~120ms so the stream is observable inside the dashboard.
         if (dash.state == .running) {
-            const tick_start = std.time.nanoTimestamp();
-            _ = dash.emitNextEvent(&console);
-            dash.elapsed_ms += @intCast(@divTrunc(std.time.nanoTimestamp() - tick_start, 1_000_000));
+            const now_ns = std.time.nanoTimestamp();
+            if (now_ns - dash.last_emit_ns >= 120_000_000) {
+                dash.last_emit_ns = now_ns;
+                _ = dash.emitNextEvent(&console);
+                dash.elapsed_ms = @intCast(@divTrunc(now_ns - dash.last_tick_ns, 1_000_000));
+            }
         }
 
         // Render.
