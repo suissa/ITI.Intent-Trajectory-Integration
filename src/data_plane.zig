@@ -268,9 +268,10 @@ test "probeAll isolates adapter failures and returns only capable adapters" {
 
     var first = MemoryAdapter{};
     var second = MemoryAdapter{ .fail = true };
+    var third = MemoryAdapter{};
     try registry.register(first.asAdapter("read-store", CapabilitySet.init(&.{.read})));
     try registry.register(second.asAdapter("failing-read-store", CapabilitySet.init(&.{.read})));
-    try registry.register(MemoryAdapter{}.asAdapter("write-store", CapabilitySet.init(&.{.write})));
+    try registry.register(third.asAdapter("write-store", CapabilitySet.init(&.{.write})));
 
     const outcomes = try registry.probeAll(.read, std.testing.io, .{ .correlation_id = "corr-all" });
     defer std.testing.allocator.free(outcomes);
