@@ -51,7 +51,11 @@ jobs:
       - name: Run real CDP browser smoke test
         env:
           ITI_CUSTOMER_EMAIL: smoke@example.com
-        run: zig build run -Dspec=examples/e2e-smoke.iti -Dprofile=standard -Dui=ndjson
+        run: |
+          set -o pipefail
+          zig build run -Dspec=examples/e2e-smoke.iti -Dprofile=standard -Dui=ndjson 2>&1 | tee /tmp/iti-smoke.log
+          grep -q '"kind":"benchmark_sample"' /tmp/iti-smoke.log
+          grep -q '"kind":"assertion_passed"' /tmp/iti-smoke.log
 
       - name: Lightpanda diagnostics
         if: always()
