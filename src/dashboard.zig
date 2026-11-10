@@ -1026,13 +1026,14 @@ pub fn main(init: std.process.Init) !void {
 // ============================================
 
 test "formatLogLine renders signale-style columns" {
+    var line = LogLine{};
+    @memcpy(&line.time, "12:34:56");
+    copyBounded("info", line.level_tag[0..], &line.tag_len);
+    copyBounded("RUN", line.scope[0..], &line.scope_len);
+    copyBoundedSlice("hello", &line.message, &line.message_len);
+
     var buf: [220]u8 = undefined;
-    const out = try formatLogLine(.{
-        .time = "12:34:56",
-        .level_tag = "info",
-        .scope = "RUN",
-        .message = "hello",
-    }, &buf);
+    const out = try formatLogLine(line, &buf);
     try std.testing.expectEqualStrings("12:34:56  info   RUN     │ hello", out);
 }
 
