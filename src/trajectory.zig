@@ -102,17 +102,46 @@ pub const Console = struct {
 };
 
 fn emitNdjson(e: Event) void {
-    std.debug.print(
-        "{{\"sequence\":{d},\"kind\":\"{s}\",\"trajectory\":\"{s}\",\"track\":\"{s}\",\"name\":\"{s}\",\"status\":\"{s}\"}}\n",
-        .{
-            e.sequence,
-            @tagName(e.kind),
-            e.trajectory,
-            e.track,
-            e.name,
-            @tagName(e.status),
-        },
-    );
+    const Record = struct {
+        protocol: []const u8 = "iti.trajectory",
+        version: u8 = 1,
+        sequence: usize,
+        kind: []const u8,
+        trajectory: []const u8,
+        track: []const u8,
+        name: []const u8,
+        status: []const u8,
+        trackIndex: usize,
+        parentTrackIndex: usize,
+        correlationId: []const u8,
+        causationId: []const u8,
+        actorType: []const u8,
+        subjectId: []const u8,
+        intentId: []const u8,
+        behaviorId: []const u8,
+        actionId: []const u8,
+    };
+    const record = Record{
+        .sequence = e.sequence,
+        .kind = @tagName(e.kind),
+        .trajectory = e.trajectory,
+        .track = e.track,
+        .name = e.name,
+        .status = @tagName(e.status),
+        .trackIndex = e.track_index,
+        .parentTrackIndex = e.parent_track_index,
+        .correlationId = e.semantic.correlation_id,
+        .causationId = e.semantic.causation_id,
+        .actorType = e.semantic.actor_type,
+        .subjectId = e.semantic.subject_id,
+        .intentId = e.semantic.intent_id,
+        .behaviorId = e.semantic.behavior_id,
+        .actionId = e.semantic.action_id,
+    };
+    const allocator = std.heap.page_allocator;
+    const json = std.json.Stringify.valueAlloc(allocator, record, .{}) catch return;
+    defer allocator.free(json);
+    std.debug.print("{s}\n", .{json});
 }
 
 fn emitTui(e: Event) void {
