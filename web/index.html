@@ -36,18 +36,58 @@ const trajectory=document.querySelector('#trajectory');
 const profile=document.querySelector('#profile');
 const tracks=document.querySelector('#tracks');
 const ws=new WebSocket('ws://'+(location.hostname||'127.0.0.1')+':7331');
-ws.onopen=()=>{connection.textContent='connected';connection.className='status ok';};
-ws.onclose=()=>{connection.textContent='disconnected';connection.className='status fail';};
-ws.onerror=()=>{connection.textContent='websocket unavailable';connection.className='status fail';};
-ws.onmessage=({data})=>{
-  const e=JSON.parse(data);
-  trajectory.textContent=e.trajectory||'—';
-  if(e.kind==='run_started')profile.textContent=e.name||'—';
+
+function renderEvent(event){
+  trajectory.textContent=event.trajectory||'—';
+  if(event.kind==='run_started')profile.textContent=event.name||'—';
+
   const card=document.createElement('div');
   card.className='card track';
-  const icon=e.status==='passed'?'✓':e.status==='failed'?'✗':e.status==='observed'?'↳':'●';
-  card.innerHTML='<span>'+icon+'</span><strong>'+(e.track||e.kind)+'</strong><span class="event">'+(e.name||'')+'</span><span class="pill">'+e.kind+'</span>';
+
+  const icon=document.createElement('span');
+  icon.textContent=event.status==='passed'?'✓':event.status==='failed'?'✗':event.status==='observed'?'↳':'●';
+  const title=document.createElement('strong');
+  title.textContent=event.track||event.kind;
+  const message=document.createElement('span');
+  message.className='event';
+  message.textContent=event.name||'';
+  const tag=document.createElement('span');
+  tag.className='pill';
+  tag.textContent=(event.kind||'event')+' · #'+event.sequence;
+
+  card.append(icon,title,message,tag);
   tracks.prepend(card);
+}
+
+ws.onopen=()=>{
+  connection.textContent='connected';
+  connection.className='status ok';
+  ws.send(JSON.stringify({type:'subscribe'}));
+};
+ws.onclose=()=>{
+  connection.textContent='disconnected';
+  connection.className='status fail';
+};
+ws.onerror=()=>{
+  connection.textContent='websocket unavailable';
+  connection.className='status fail';
+};
+ws.onmessage=({data})=>{
+  const frame=JSON.parse(data);
+  if(frame.kind==='snapshot'||frame.kind==='replay'){
+    tracks.replaceChildren();
+    trajectory.textContent='—';
+    profile.textContent='—';
+    for(const event of frame.events||[]) renderEvent(event);
+    if(frame.truncated){
+      const warning=document.createElement('div');
+      warning.className='event muted';
+      warning.textContent='Replay window exceeded; showing retained events only.';
+      tracks.prepend(warning);
+    }
+    return;
+  }
+  if(frame.kind==='event'&&frame.event) renderEvent(frame.event);
 };
 </script>
 </body>
