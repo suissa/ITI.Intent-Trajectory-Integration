@@ -25,7 +25,8 @@ pub const Client = struct {
             .session_id = "",
         };
 
-        const version = client.command("Browser.getVersion", .{}, null) catch |err| {
+        const empty_params = std.json.Value{ .object = std.json.ObjectMap.init(allocator) };
+        const version = client.command("Browser.getVersion", empty_params, null) catch |err| {
             std.debug.print("ITI CDP Browser.getVersion: {s}\\n", .{@errorName(err)});
             return err;
         };
@@ -58,12 +59,12 @@ pub const Client = struct {
         client.session_id = try allocator.dupe(u8, session);
         errdefer allocator.free(client.session_id);
 
-        const page_enabled = client.command("Page.enable", .{}, client.session_id) catch |err| {
+        const page_enabled = client.command("Page.enable", empty_params, client.session_id) catch |err| {
             std.debug.print("ITI CDP Page.enable: {s}\\n", .{@errorName(err)});
             return err;
         };
         page_enabled.deinit();
-        const runtime_enabled = client.command("Runtime.enable", .{}, client.session_id) catch |err| {
+        const runtime_enabled = client.command("Runtime.enable", empty_params, client.session_id) catch |err| {
             std.debug.print("ITI CDP Runtime.enable: {s}\\n", .{@errorName(err)});
             return err;
         };
