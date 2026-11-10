@@ -9,7 +9,7 @@ const SockAddrIn = extern struct {
     family: u16,
     port: u16,
     address: u32,
-    zero: [8]u8 = @splat(0),
+    zero: [8]u8,
 };
 
 /// Pure Zig WebSocket client for CDP communication.
@@ -54,6 +54,7 @@ pub const WebSocketClient = struct {
             .family = 2,
             .port = std.mem.nativeToBig(u16, parsed.port),
             .address = ip_addr,
+            .zero = @splat(0),
         };
         if (c_connect(fd, @ptrCast(&addr), @sizeOf(SockAddrIn)) != 0) {
             return Error.ConnectionFailed;
