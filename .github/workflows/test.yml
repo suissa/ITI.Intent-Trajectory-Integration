@@ -28,3 +28,13 @@ jobs:
 
       - name: Run tests
         run: zig build test
+
+      - name: Install pinned Lightpanda
+        run: |
+          curl -fsSL https://pkg.lightpanda.io/install.sh | bash -s "1.0.3"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run real CDP browser smoke test
+        env:
+          ITI_CUSTOMER_EMAIL: smoke@example.com
+        run: zig build run -Dspec=examples/e2e-smoke.iti -Dprofile=standard -Dui=ndjson
