@@ -1,9 +1,9 @@
 const std = @import("std");
-extern "c" fn socket(domain: c_int, socket_type: c_int, protocol: c_int) c_int;
-extern "c" fn connect(fd: c_int, address: *const anyopaque, address_len: u32) c_int;
-extern "c" fn read(fd: c_int, buffer: [*]u8, count: usize) isize;
-extern "c" fn write(fd: c_int, buffer: [*]const u8, count: usize) isize;
-extern "c" fn close(fd: c_int) c_int;
+extern "c" fn c_socket(domain: c_int, socket_type: c_int, protocol: c_int) c_int;
+extern "c" fn c_connect(fd: c_int, address: *const anyopaque, address_len: u32) c_int;
+extern "c" fn c_read(fd: c_int, buffer: [*]u8, count: usize) isize;
+extern "c" fn c_write(fd: c_int, buffer: [*]const u8, count: usize) isize;
+extern "c" fn c_close(fd: c_int) c_int;
 
 const SockAddrIn = extern struct {
     family: u16,
@@ -37,7 +37,7 @@ pub const WebSocketClient = struct {
     };
 
     /// Connect to a loopback WebSocket endpoint. url must be like "ws://host:port/path".
-    pub fn connect(allocator: std.mem.Allocator, io: std.Io, url: []const u8, read_buf: []u8) !WebSocketClient {
+    pub fn c_connect(allocator: std.mem.Allocator, io: std.Io, url: []const u8, read_buf: []u8) !WebSocketClient {
         if (@import("builtin").os.tag == .windows) return Error.ConnectionFailed;
         const parsed = try parseWsUrl(url);
 
@@ -45,17 +45,17 @@ pub const WebSocketClient = struct {
         const resolved_host = if (std.mem.eql(u8, parsed.host, "localhost")) "127.0.0.1" else parsed.host;
         const ip_addr = parseIp4(resolved_host) orelse return Error.ConnectionFailed;
 
-        const raw_fd = socket(2, 1, 0);
+        const raw_fd = c_socket(2, 1, 0);
         if (raw_fd < 0) return Error.ConnectionFailed;
         const fd: c_int = raw_fd;
-        errdefer _ = close(fd);
+        errdefer _ = c_close(fd);
 
         var addr: SockAddrIn = .{
             .family = 2,
             .port = std.mem.nativeToBig(u16, parsed.port),
             .address = ip_addr,
         };
-        if (connect(fd, @ptrCast(&addr), @sizeOf(SockAddrIn)) != 0) {
+        if (c_connect(fd, @ptrCast(&addr), @sizeOf(SockAddrIn)) != 0) {
             return Error.ConnectionFailed;
         }
 
@@ -92,13 +92,13 @@ pub const WebSocketClient = struct {
         return self.readFrameAlloc(allocator, max_size);
     }
 
-    pub fn close(self: *WebSocketClient) void {
+    pub fn c_close(self: *WebSocketClient) void {
         if (self.connected) {
             // Send close frame (opcode 8), best effort
             self.writeFrame(0x8, &.{}) catch {};
             self.connected = false;
         }
-        _ = close(self.fd);
+        _ = c_close(self.fd);
     }
 
     // --- Internal ---
@@ -239,7 +239,7 @@ pub const WebSocketClient = struct {
     fn writeAll(self: *WebSocketClient, data: []const u8) !void {
         var sent: usize = 0;
         while (sent < data.len) {
-            const n = write(self.fd, data.ptr + sent, data.len - sent);
+            const n = c_write(self.fd, data.ptr + sent, data.len - sent);
             if (n <= 0) return Error.WriteFailed;
             sent += @intCast(n);
         }
@@ -247,7 +247,7 @@ pub const WebSocketClient = struct {
 
     fn rawRead(self: *WebSocketClient, buf: []u8) !usize {
         if (@import("builtin").os.tag == .windows) return Error.ReadFailed;
-        const n = read(self.fd, buf.ptr, buf.len);
+        const n = c_read(self.fd, buf.ptr, buf.len);
         if (n < 0) return Error.ReadFailed;
         return @intCast(n);
     }
