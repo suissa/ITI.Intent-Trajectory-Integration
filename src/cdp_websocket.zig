@@ -28,6 +28,8 @@ pub const WebSocketClient = struct {
         ReadFailed,
         MessageTooLarge,
         ConnectionClosed,
+        SocketEof,
+        PeerSentClose,
         InvalidFrame,
     };
 
@@ -179,7 +181,22 @@ pub const WebSocketClient = struct {
 
         if (opcode == 0x8) {
             self.connected = false;
-            return Error.ConnectionClosed;
+            var close_payload: [125]u8 = undefined;
+            const close_len = @min(@as(usize, @intCast(payload_len)), close_payload.len);
+            if (masked) {
+                var mask: [4]u8 = undefined;
+                try self.readExact(&mask);
+                try self.readExact(close_payload[0..close_len]);
+                for (close_payload[0..close_len], 0..) |*byte, index| byte.* ^= mask[index % 4];
+            } else if (close_len > 0) {
+                try self.readExact(close_payload[0..close_len]);
+            }
+            const close_code: u16 = if (close_len >= 2)
+                (@as(u16, close_payload[0]) << 8) | close_payload[1]
+            else
+                0;
+            std.debug.print("ITI WebSocket peer close: code={d}, payload={s}\\n", .{ close_code, if (close_len > 2) close_payload[2..close_len] else "" });
+            return Error.PeerSentClose;
         }
         if (opcode == 0x9) {
             if (payload_len > max_size or payload_len > std.math.maxInt(usize)) return Error.MessageTooLarge;
@@ -229,7 +246,10 @@ pub const WebSocketClient = struct {
         var received: usize = 0;
         while (received < bytes.len) {
             const count = try self.readSome(bytes[received..]);
-            if (count == 0) return Error.ConnectionClosed;
+            if (count == 0) {
+                std.debug.print("ITI WebSocket socket reached EOF while reading {d} bytes\\n", .{bytes.len});
+                return Error.SocketEof;
+            }
             received += count;
         }
     }
