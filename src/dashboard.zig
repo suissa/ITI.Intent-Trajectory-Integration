@@ -320,14 +320,14 @@ pub const Dashboard = struct {
             out.emit(.{ .kind = .run_started, .trajectory = trajectory_name, .name = entry.profile_name });
         } else if (i == 1) {
             self.log(.info, "TRJ", "trajectory_started", trajectory_name, tui.Color.hex(0x8BE9FD));
-            out.emit(.{ .kind = .trajectory_started, .trajectory = trajectory_name });
+            out.emit(.{ .kind = .trajectory_started, .trajectory = trajectory_name, .name = entry.name });
         } else if (step_index) |si| {
             const step = steps[si];
             const track = stepTrack(step.kind);
             switch (phase) {
                 0 => {
                     self.log(.debug, "TRK", "track_started", step.raw, tui.Color.hex(0x8BE9FD));
-                    out.emit(.{ .kind = .track_started, .trajectory = trajectory_name, .track = track, .name = step.raw });
+                    out.emit(.{ .kind = .track_started, .trajectory = trajectory_name, .track = track, .name = step.raw, .track_index = si + 1 });
                 },
                 1 => {
                     if (step.kind == .hope or step.kind == .hope_see) {
@@ -338,6 +338,7 @@ pub const Dashboard = struct {
                             .track = track,
                             .name = step.object,
                             .status = .passed,
+                            .track_index = si + 1,
                         });
                     } else {
                         self.log(.action, "ACT", "expansion", step.raw, tui.Color.hex(0xF8F8F2));
@@ -347,6 +348,7 @@ pub const Dashboard = struct {
                             .track = track,
                             .name = step.raw,
                             .status = .observed,
+                            .track_index = si + 1,
                         });
                     }
                 },
@@ -357,6 +359,7 @@ pub const Dashboard = struct {
                         .trajectory = trajectory_name,
                         .track = track,
                         .status = .passed,
+                        .track_index = si + 1,
                     });
                 },
             }
@@ -922,6 +925,7 @@ pub fn run(
     suite: []const SuiteEntry,
     projection: trajectory.Projection,
     sink: ?trajectory.EventSink,
+    semantic_context: trajectory.SemanticContext,
     allocator: std.mem.Allocator,
     io: std.Io,
 ) !void {
@@ -940,7 +944,11 @@ pub fn run(
     _ = &reader;
 
     var dash = Dashboard.init(suite);
-    var console = trajectory.Console{ .projection = projection, .sink = sink };
+    var console = trajectory.Console{
+        .projection = projection,
+        .sink = sink,
+        .semantic_context = semantic_context,
+    };
 
     const theme = tui.theme.Theme.dracula;
     _ = theme;
@@ -1018,7 +1026,7 @@ pub fn main(init: std.process.Init) !void {
     };
     const suite = buildSuite(&parsed_spec.steps, &profileProbes(selected_profile), build_options.spec, build_options.profile);
 
-    try run(suite, .tui, null, init.gpa, init.io);
+    try run(suite, .tui, null, .{}, init.gpa, init.io);
 }
 
 // ============================================

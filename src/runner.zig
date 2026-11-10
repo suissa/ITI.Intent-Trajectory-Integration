@@ -8,8 +8,13 @@ pub fn runParsed(
     comptime projection: trajectory.Projection,
     comptime profile_name: []const u8,
     sink: ?trajectory.EventSink,
+    semantic_context: trajectory.SemanticContext,
 ) void {
-    var out = trajectory.Console{ .projection = projection, .sink = sink };
+    var out = trajectory.Console{
+        .projection = projection,
+        .sink = sink,
+        .semantic_context = semantic_context,
+    };
     const trajectory_name = "iti.intent-trajectory";
 
     out.emit(.{
@@ -20,15 +25,18 @@ pub fn runParsed(
     out.emit(.{
         .kind = .trajectory_started,
         .trajectory = trajectory_name,
+        .name = profile_name,
     });
 
-    inline for (spec.steps) |step| {
+    inline for (spec.steps, 0..) |step, index| {
+        const track_index = index + 1;
         const track = trackName(step.kind);
         out.emit(.{
             .kind = .track_started,
             .trajectory = trajectory_name,
             .track = track,
             .name = step.raw,
+            .track_index = track_index,
         });
 
         if (step.kind == .hope or step.kind == .hope_see) {
@@ -38,6 +46,7 @@ pub fn runParsed(
                 .track = track,
                 .name = step.object,
                 .status = .passed,
+                .track_index = track_index,
             });
         } else {
             out.emit(.{
@@ -46,6 +55,7 @@ pub fn runParsed(
                 .track = track,
                 .name = step.raw,
                 .status = .observed,
+                .track_index = track_index,
             });
         }
 
@@ -54,6 +64,7 @@ pub fn runParsed(
             .trajectory = trajectory_name,
             .track = track,
             .status = .passed,
+            .track_index = track_index,
         });
     }
 

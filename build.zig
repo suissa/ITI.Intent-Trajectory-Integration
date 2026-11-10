@@ -6,11 +6,13 @@ pub fn build(b: *std.Build) void {
     const spec = b.option([]const u8, "spec", "ITI DSL file embedded and parsed at comptime") orelse "examples/login.iti";
     const profile = b.option([]const u8, "profile", "Test profile: minimal|standard|data|performance|full") orelse "standard";
     const ui = b.option([]const u8, "ui", "Output projection: ndjson|tui") orelse "tui";
+    const opentrajectory = b.option(bool, "opentrajectory", "Enable OpenTrajectory.Digital NDJSON export") orelse false;
 
     const options = b.addOptions();
     options.addOption([]const u8, "spec", spec);
     options.addOption([]const u8, "profile", profile);
     options.addOption([]const u8, "ui", ui);
+    options.addOption(bool, "opentrajectory", opentrajectory);
 
     // The pinned TUI.zig revision still uses the removed ArrayList.writer API.
     // Apply a small idempotent compatibility shim before compiling its module.
