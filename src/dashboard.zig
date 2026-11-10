@@ -436,8 +436,8 @@ pub const Dashboard = struct {
     ) void {
         var line = LogLine{};
         _ = timestampInto(&line.time);
-        copyBounded(tag, &line.level_tag, &line.tag_len);
-        copyBounded(scope, &line.scope, &line.scope_len);
+        copyBounded(tag, line.level_tag[0..], &line.tag_len);
+        copyBounded(scope, line.scope[0..], line.scope[0..]_len);
         var msg_buf: [log_line_len]u8 = undefined;
         const msg = sanitize(message, &msg_buf);
         copyBoundedSlice(msg, &line.message, &line.message_len);
@@ -451,8 +451,8 @@ pub const Dashboard = struct {
         const msg = std.fmt.bufPrint(&msg_buf, fmt, args) catch msg_buf[0..0];
         var line = LogLine{};
         _ = timestampInto(&line.time);
-        copyBounded(state.badgeTag(), &line.level_tag, &line.tag_len);
-        copyBounded("SYS", &line.scope, &line.scope_len);
+        copyBounded(state.badgeTag(), line.level_tag[0..], &line.tag_len);
+        copyBounded("SYS", line.scope[0..], line.scope[0..]_len);
         copyBoundedSlice(msg, &line.message, &line.message_len);
         line.color = state.badgeColor();
         line.bold = true;
@@ -863,7 +863,7 @@ fn upper(comptime src: []const u8) []const u8 {
 }
 
 /// Copies `src` into a fixed-size array field, tracking its length.
-fn copyBounded(src: []const u8, buf: anytype, len: anytype) void {
+fn copyBounded(src: []const u8, buf: []u8, len: *u16) void {
     const n = @min(src.len, buf.len);
     @memcpy(buf[0..n], src[0..n]);
     len.* = @intCast(n);
