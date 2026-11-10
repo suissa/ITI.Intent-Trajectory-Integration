@@ -38,3 +38,9 @@ jobs:
         env:
           ITI_CUSTOMER_EMAIL: smoke@example.com
         run: zig build run -Dspec=examples/e2e-smoke.iti -Dprofile=standard -Dui=ndjson
+
+      - name: Lightpanda diagnostics
+        if: always()
+        run: |
+          curl -sv http://127.0.0.1:9222/json/version || true
+          tail -100 /tmp/iti-lightpanda.log || true
