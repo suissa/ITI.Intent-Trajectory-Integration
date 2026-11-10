@@ -41,13 +41,23 @@ pub const Event = struct {
     sequence: usize = 0,
 };
 
+pub const EventSink = struct {
+    context: *anyopaque,
+    emit_fn: *const fn (context: *anyopaque, event: Event) Event,
+
+    pub fn emit(self: EventSink, event: Event) Event {
+        return self.emit_fn(self.context, event);
+    }
+};
+
 pub const Console = struct {
     sequence: usize = 0,
     projection: Projection = .ndjson,
+    sink: ?EventSink = null,
 
     pub fn emit(self: *Console, event: Event) void {
         self.sequence += 1;
-        const e = Event{
+        var e = Event{
             .kind = event.kind,
             .trajectory = event.trajectory,
             .track = event.track,
@@ -55,6 +65,10 @@ pub const Console = struct {
             .status = event.status,
             .sequence = self.sequence,
         };
+        if (self.sink) |sink| {
+            e = sink.emit(e);
+            self.sequence = e.sequence;
+        }
 
         switch (self.projection) {
             .ndjson => emitNdjson(e),
