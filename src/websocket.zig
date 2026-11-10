@@ -153,7 +153,8 @@ pub const Hub = struct {
 
 const SubscribeRequest = struct {
     after_sequence: usize = 0,
-    session_id: []const u8 = "",
+    session_id: [32]u8 = [_]u8{0} ** 32,
+    session_id_len: usize = 0,
 };
 
 const SnapshotFrame = struct {
@@ -203,8 +204,9 @@ fn parseSubscribe(allocator: std.mem.Allocator, bytes: []const u8) ?SubscribeReq
         request.after_sequence = @intCast(value.integer);
     }
     if (object.get("sessionId")) |value| {
-        if (value != .string) return null;
-        request.session_id = value.string;
+        if (value != .string or value.string.len > request.session_id.len) return null;
+        @memcpy(request.session_id[0..value.string.len], value.string);
+        request.session_id_len = value.string.len;
     }
     return request;
 }
@@ -294,7 +296,7 @@ fn handleConnection(
     var buffer: [event_capacity]trajectory.Event = undefined;
     const initial = hub.readAfter(
         subscribe.?.after_sequence,
-        subscribe.?.session_id,
+        subscribe.?.session_id[0..subscribe.?.session_id_len],
         &buffer,
     );
     sendBatch(&ws, allocator, hub, initial) catch return;
