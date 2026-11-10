@@ -207,7 +207,7 @@ pub const Exporter = struct {
             null;
         track.depth = if (event.parent_track_index > 0) 1 else 0;
         const semantic = self.effectiveSemantic(event.semantic);
-        track.attributes = self.attributes(semantic, event.track_index, event.track);
+        track.attributes = self.attributes(semantic, index, event.track);
         try self.writeEvent("track.started", track.snapshot(self.trajectory_id));
 
         if (previous > 0 and previous != index) {
@@ -265,13 +265,16 @@ pub const Exporter = struct {
 
     fn recordProbe(self: *Exporter, event: trajectory.Event) !void {
         const index = if (event.track_index > 0) event.track_index else self.tracks.items.len + 1;
+        const is_new = index > self.tracks.items.len;
         const track = try self.ensureTrack(index, event);
-        if (track.started_ns == 0) {
-            track.started_ns = nowNs(self.io);
-            track.started_at = try timestamp(self.allocator());
+        if (is_new) {
             track.name = event.track;
             track.status = "running";
             try self.writeEvent("track.started", track.snapshot(self.trajectory_id));
+            if (self.last_track_index > 0) {
+                try self.addRelation(self.last_track_index, index, "follows", event.semantic);
+            }
+            self.last_track_index = index;
         }
         const semantic = self.effectiveSemantic(event.semantic);
         const expansion = try self.appendExpansion(track, event.name, semantic);
