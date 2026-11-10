@@ -16,6 +16,7 @@ const SockAddrIn = extern struct {
 /// Implements RFC 6455: HTTP upgrade handshake, masked client frames, unmasked server reads.
 pub const WebSocketClient = struct {
     allocator: std.mem.Allocator,
+    io: std.Io,
     fd: c_int,
     connected: bool,
 
@@ -60,6 +61,7 @@ pub const WebSocketClient = struct {
 
         var ws = WebSocketClient{
             .allocator = allocator,
+            .io = io,
             .fd = fd,
             .connected = false,
             .read_buf = read_buf,
@@ -272,7 +274,7 @@ pub const WebSocketClient = struct {
 
         // Generate masking key
         var mask_key: [4]u8 = undefined;
-        std.crypto.random.bytes(&mask_key);
+        self.io.random(&mask_key);
         @memcpy(frame_buf[header_len .. header_len + 4], &mask_key);
         header_len += 4;
 
