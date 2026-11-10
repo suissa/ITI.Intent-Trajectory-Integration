@@ -141,8 +141,8 @@ pub const Exporter = struct {
     ) !Exporter {
         var arena = std.heap.ArenaAllocator.init(parent_allocator);
         errdefer arena.deinit();
-        const allocator = arena.allocator();
-        const owned_session = try allocator.dupe(u8, session_id);
+        const arena_allocator = arena.allocator();
+        const owned_session = try arena_allocator.dupe(u8, session_id);
         return .{
             .arena = arena,
             .io = io,
