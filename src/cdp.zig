@@ -200,7 +200,7 @@ pub const Client = struct {
                 parsed.deinit();
                 continue;
             };
-            if (response_id != .integer or response_id.integer != id) {
+            if (response_id != .integer or response_id.integer != @as(i64, @intCast(id))) {
                 parsed.deinit();
                 continue;
             }
