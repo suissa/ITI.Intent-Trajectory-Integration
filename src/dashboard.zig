@@ -302,11 +302,8 @@ pub const Dashboard = struct {
         const probes = entry.probes;
         const trajectory_name = "iti.intent-trajectory";
 
-        const track_started_count = steps.len;
-        const expansion_assert_count = steps.len;
-        const track_finished_count = steps.len;
         const probes_count = probes.len;
-        const per_test = 2 + 4 * steps.len + probes_count + 4;
+        const per_test = 4 * steps.len + probes_count + 4;
 
         var test_index: usize = 0;
         var base: usize = 0;
