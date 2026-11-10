@@ -42,7 +42,7 @@ const OtdTrackSnapshot = struct {
     sequence: usize,
     attributes: OtdAttributes,
     expansions: []const OtdExpansion,
-    error: ?OtdError = null,
+    @"error": ?OtdError = null,
 };
 
 const OtdRelation = struct {
@@ -104,7 +104,7 @@ const TrackState = struct {
             .sequence = self.sequence,
             .attributes = self.attributes,
             .expansions = self.expansions.items,
-            .error = self.failure,
+            .@"error" = self.failure,
         };
     }
 };
@@ -439,7 +439,7 @@ pub const Exporter = struct {
             sequence: usize,
             timestamp: []const u8,
             trajectoryId: []const u8,
-            type: []const u8,
+            @"type": []const u8,
             payload: Payload,
         };
         const envelope = Envelope{
@@ -447,7 +447,7 @@ pub const Exporter = struct {
             .sequence = self.sequence,
             .timestamp = event_timestamp,
             .trajectoryId = self.trajectory_id,
-            .type = event_type,
+            .@"type" = event_type,
             .payload = payload,
         };
         const json = try std.json.Stringify.valueAlloc(self.allocator(), envelope, .{});
