@@ -339,11 +339,11 @@ pub const Dashboard = struct {
                     self.last_step_duration_ms = 0;
                     if (self.browser) |runtime| {
                         if (isBrowserStep(step.kind)) {
-                            self.last_step_duration_ms = runtime.execute(step) catch |err| {
+                            self.last_step_duration_ms = runtime.execute(step) catch |err| duration: {
                                 self.last_step_failed = true;
                                 self.run_failed = true;
                                 self.log(.warn, "ERR", "browser_step_failed", @errorName(err), tui.Color.hex(0xFF5555));
-                                0
+                                break :duration 0;
                             };
                         }
                     }
