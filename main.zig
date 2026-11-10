@@ -22,7 +22,7 @@ const selected_profile = blk: {
 
 const selected_projection = trajectory.Projection.fromName(build_options.ui);
 const behavior_hash = std.hash.Wyhash.hash(0, source);
-const behavior_id = comptime std.fmt.comptimePrint("behavior-{x}", .{behavior_hash});
+const behavior_id = std.fmt.comptimePrint("behavior-{x}", .{behavior_hash});
 
 fn actorType() []const u8 {
     inline for (parsed_spec.steps) |step| {
