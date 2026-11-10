@@ -6,6 +6,7 @@
     .dependencies = .{
         .tui = .{
             .url = "https://github.com/suissa/ChappieTUI/archive/60daa93eea9031d07f61f24b1a37f6539905f5cb.tar.gz",
+            .hash = "tui_zig-0.1.0-aTPZNiZsBABjSWD9-L6PpXTwmjwkiPC_911VYTii0yeL",
         },
     },
     .paths = .{
