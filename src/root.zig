@@ -4,6 +4,7 @@ pub const trajectory = @import("trajectory.zig");
 pub const runner = @import("runner.zig");
 pub const dashboard = @import("dashboard.zig");
 pub const websocket = @import("websocket.zig");
+pub const opentrajectory = @import("opentrajectory.zig");
 
 test {
     _ = dsl;
@@ -12,4 +13,5 @@ test {
     _ = runner;
     _ = dashboard;
     _ = websocket;
+    _ = opentrajectory;
 }
