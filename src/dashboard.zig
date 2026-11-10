@@ -435,7 +435,7 @@ pub const Dashboard = struct {
         color: tui.Color,
     ) void {
         var line = LogLine{};
-        timestampInto(&line.time);
+        _ = timestampInto(&line.time);
         copyBounded(tag, &line.level_tag, &line.tag_len);
         copyBounded(scope, &line.scope, &line.scope_len);
         var msg_buf: [log_line_len]u8 = undefined;
@@ -450,7 +450,7 @@ pub const Dashboard = struct {
         var msg_buf: [log_line_len]u8 = undefined;
         const msg = std.fmt.bufPrint(&msg_buf, fmt, args) catch msg_buf[0..0];
         var line = LogLine{};
-        timestampInto(&line.time);
+        _ = timestampInto(&line.time);
         copyBounded(state.badgeTag(), &line.level_tag, &line.tag_len);
         copyBounded("SYS", &line.scope, &line.scope_len);
         copyBoundedSlice(msg, &line.message, &line.message_len);
@@ -466,7 +466,7 @@ pub const Dashboard = struct {
             .key => |ke| {
                 if (ke.modifiers.ctrl) return .ignored;
                 switch (ke.key) {
-                    .char => |c| switch (std.ascii.toLower(c)) {
+                    .char => |c| switch (if (c < 128) std.ascii.toLower(@intCast(c)) else 0) {
                         'e', 'r' => { self.execute(); return .needs_redraw; },
                         'p' => { self.pause(); return .needs_redraw; },
                         's', 'x' => { self.stop(); return .needs_redraw; },
@@ -548,7 +548,7 @@ pub const Dashboard = struct {
         renderFooter(&sub, self, w, h);
     }
 
-    fn renderHeader(sub: *tui.SubScreen, w: u16) void {
+    fn renderHeader(sub: *tui.screen.SubScreen, w: u16) void {
         sub.setStyle(.{ .fg = tui.Color.white, .bg = tui.Color.black, .attrs = .{ .bold = true } });
         sub.fill(' ');
 
@@ -568,7 +568,7 @@ pub const Dashboard = struct {
         sub.hline(0, 1, w, '─');
     }
 
-    fn renderBody(sub: *tui.SubScreen, self: *Dashboard, w: u16, h: u16) void {
+    fn renderBody(sub: *tui.screen.SubScreen, self: *Dashboard, w: u16, h: u16) void {
         const body_top: u16 = 2;
         const body_bottom: u16 = h - 3; // footer occupies controls + progress rows
 
@@ -635,7 +635,7 @@ pub const Dashboard = struct {
         }
     }
 
-    fn drawLogLine(sub: *tui.SubScreen, meta: *const LogLine, x: u16, y: u16, max_w: u16) void {
+    fn drawLogLine(sub: *tui.screen.SubScreen, meta: *const LogLine, x: u16, y: u16, max_w: u16) void {
         const dim = tui.Style{ .fg = tui.Color.hex(0x6272A4) };
         const badge = tui.Style{ .fg = tui.Color.hex(0x282A36), .bg = meta.color, .attrs = .{ .bold = true } };
         const scope_style = tui.Style{
@@ -725,7 +725,7 @@ pub const Dashboard = struct {
         }
     }
 
-    fn renderFooter(sub: *tui.SubScreen, self: *Dashboard, w: u16, h: u16) void {
+    fn renderFooter(sub: *tui.screen.SubScreen, self: *Dashboard, w: u16, h: u16) void {
         const controls_y = h - 2;
         const bar_y = h - 1;
 
@@ -819,7 +819,7 @@ fn rectHit(px: u16, py: u16, x: u16, y: u16, w: u16, h: u16) bool {
     return px >= x and px < x + w and py >= y and py < y + h;
 }
 
-fn drawButton(sub: *tui.SubScreen, x: u16, y: u16, w: u16, label: []const u8, enabled: bool, hovered: bool, primary: bool) void {
+fn drawButton(sub: *tui.screen.SubScreen, x: u16, y: u16, w: u16, label: []const u8, enabled: bool, hovered: bool, primary: bool) void {
     _ = w;
     const bg_color: tui.Color = if (!enabled)
         tui.Color.hex(0x44475A)
@@ -895,11 +895,14 @@ fn padRight(src: []const u8, buf: []u8) []u8 {
 }
 
 fn timestampInto(buf: *[8]u8) []const u8 {
-    const ts = std.time.timestamp();
-    const tm = std.time.gmtime(&ts);
-    const hh = tm.hour;
-    const mm = tm.min;
-    const ss = tm.sec;
+    var ts: std.posix.timespec = undefined;
+    _ = std.posix.system.clock_gettime(.REALTIME, &ts);
+    const day = std.time.epoch.EpochSeconds{
+        .secs = @intCast(ts.sec),
+    }.getDaySeconds();
+    const hh = day.getHoursIntoDay();
+    const mm = day.getMinutesIntoHour();
+    const ss = day.getSecondsIntoMinute();
     buf[0] = '0' + @as(u8, @intCast(hh / 10));
     buf[1] = '0' + @as(u8, @intCast(hh % 10));
     buf[2] = ':';
