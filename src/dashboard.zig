@@ -926,7 +926,7 @@ pub fn run(
     var term = tui.terminal.Terminal.init();
     defer term.deinit();
 
-    const size = try term.getSize();
+    const size = term.getWindowSize();
     var scr = try tui.screen.Screen.init(allocator, size.cols, size.rows);
     defer scr.deinit();
 
@@ -947,9 +947,8 @@ pub fn run(
 
     while (true) {
         // Poll input without blocking (termios VTIME gives us a ~100ms window).
-        const stdin = std.Io.File.stdin();
         var buf: [64]u8 = undefined;
-        const n = stdin.readStreaming(io, &.{&buf}) catch 0;
+        const n = term.readInput(&buf);
         if (n > 0) {
             if (try reader.parse(buf[0..n])) |event| {
                 // Global quit keys.
