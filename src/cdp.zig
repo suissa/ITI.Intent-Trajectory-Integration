@@ -68,7 +68,7 @@ pub const Client = struct {
         for (0..40) |_| {
             const ready = self.evaluateBool("document.readyState !== 'loading'") catch false;
             if (ready) return;
-            std.Thread.sleep(25_000_000);
+            try self.io.sleep(.fromMilliseconds(25), .awake);
         }
         return error.NavigationTimeout;
     }
@@ -140,7 +140,7 @@ pub const Client = struct {
         for (0..40) |_| {
             const visible = self.evaluateBool(expression) catch false;
             if (visible) return;
-            std.Thread.sleep(25_000_000);
+            try self.io.sleep(.fromMilliseconds(25), .awake);
         }
         return error.DestinationNotVisible;
     }
