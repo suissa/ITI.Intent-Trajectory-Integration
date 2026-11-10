@@ -32,6 +32,16 @@ pub const Projection = enum {
     }
 };
 
+pub const SemanticContext = struct {
+    correlation_id: []const u8 = "",
+    causation_id: []const u8 = "",
+    actor_type: []const u8 = "",
+    subject_id: []const u8 = "",
+    intent_id: []const u8 = "",
+    behavior_id: []const u8 = "",
+    action_id: []const u8 = "",
+};
+
 pub const Event = struct {
     kind: EventKind,
     trajectory: []const u8,
@@ -39,6 +49,9 @@ pub const Event = struct {
     name: []const u8 = "",
     status: Status = .running,
     sequence: usize = 0,
+    track_index: usize = 0,
+    parent_track_index: usize = 0,
+    semantic: SemanticContext = .{},
 };
 
 pub const EventSink = struct {
@@ -50,21 +63,32 @@ pub const EventSink = struct {
     }
 };
 
+pub const EventFanout = struct {
+    first: EventSink,
+    second: EventSink,
+
+    pub fn eventSink(self: *EventFanout) EventSink {
+        return .{ .context = self, .emit_fn = emitFromContext };
+    }
+
+    fn emitFromContext(context: *anyopaque, event: Event) Event {
+        const self: *EventFanout = @ptrCast(@alignCast(context));
+        const first = self.first.emit(event);
+        return self.second.emit(first);
+    }
+};
+
 pub const Console = struct {
     sequence: usize = 0,
     projection: Projection = .ndjson,
     sink: ?EventSink = null,
+    semantic_context: SemanticContext = .{},
 
     pub fn emit(self: *Console, event: Event) void {
         self.sequence += 1;
-        var e = Event{
-            .kind = event.kind,
-            .trajectory = event.trajectory,
-            .track = event.track,
-            .name = event.name,
-            .status = event.status,
-            .sequence = self.sequence,
-        };
+        var e = event;
+        e.sequence = self.sequence;
+        e.semantic = mergeSemantic(self.semantic_context, event.semantic);
         if (self.sink) |sink| {
             e = sink.emit(e);
             self.sequence = e.sequence;
@@ -116,4 +140,16 @@ fn emitTui(e: Event) void {
 test "trajectory console starts with an empty sequence" {
     const console = Console{ .projection = .ndjson };
     try std.testing.expectEqual(@as(usize, 0), console.sequence);
+}
+
+fn mergeSemantic(base: SemanticContext, event: SemanticContext) SemanticContext {
+    return .{
+        .correlation_id = if (event.correlation_id.len > 0) event.correlation_id else base.correlation_id,
+        .causation_id = if (event.causation_id.len > 0) event.causation_id else base.causation_id,
+        .actor_type = if (event.actor_type.len > 0) event.actor_type else base.actor_type,
+        .subject_id = if (event.subject_id.len > 0) event.subject_id else base.subject_id,
+        .intent_id = if (event.intent_id.len > 0) event.intent_id else base.intent_id,
+        .behavior_id = if (event.behavior_id.len > 0) event.behavior_id else base.behavior_id,
+        .action_id = if (event.action_id.len > 0) event.action_id else base.action_id,
+    };
 }
