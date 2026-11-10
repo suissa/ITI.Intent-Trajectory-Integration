@@ -923,10 +923,10 @@ pub fn run(
     io: std.Io,
 ) !void {
 
-    var term = tui.terminal.Terminal.init();
+    var term = try tui.terminal.Terminal.init(.{});
     defer term.deinit();
 
-    const size = term.getWindowSize();
+    const size = try term.getSize();
     var scr = try tui.screen.Screen.init(allocator, size.cols, size.rows);
     defer scr.deinit();
 
@@ -948,7 +948,7 @@ pub fn run(
     while (true) {
         // Poll input without blocking (termios VTIME gives us a ~100ms window).
         var buf: [64]u8 = undefined;
-        const n = term.readInput(&buf);
+        const n = readTerminalInput(&buf);
         if (n > 0) {
             if (try reader.parse(buf[0..n])) |event| {
                 // Global quit keys.
@@ -1037,4 +1037,12 @@ test "system state labels match issue vocabulary" {
     try std.testing.expectEqualStrings("PAUSED", SystemState.paused.label());
     try std.testing.expectEqualStrings("STOPPED", SystemState.stopped.label());
     try std.testing.expectEqualStrings("RUNNING", SystemState.running.label());
+}
+
+/// Read raw terminal bytes after TUI.zig has enabled raw mode.
+fn readTerminalInput(buffer: []u8) usize {
+    if (buffer.len == 0) return 0;
+    const result = std.posix.system.read(0, buffer.ptr, buffer.len);
+    const count: isize = @bitCast(result);
+    return if (count > 0) @intCast(count) else 0;
 }
