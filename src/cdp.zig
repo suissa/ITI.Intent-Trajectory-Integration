@@ -1,6 +1,10 @@
 const std = @import("std");
 const WebSocketClient = @import("cdp_websocket.zig").WebSocketClient;
 
+pub fn endpointListening() bool {
+    return WebSocketClient.isListening();
+}
+
 pub const Client = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
