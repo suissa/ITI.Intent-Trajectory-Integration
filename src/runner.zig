@@ -8,8 +8,13 @@ pub fn runParsed(
     comptime projection: trajectory.Projection,
     comptime profile_name: []const u8,
     sink: ?trajectory.EventSink,
+    semantic_context: trajectory.SemanticContext,
 ) void {
-    var out = trajectory.Console{ .projection = projection, .sink = sink };
+    var out = trajectory.Console{
+        .projection = projection,
+        .sink = sink,
+        .semantic_context = semantic_context,
+    };
     const trajectory_name = "iti.intent-trajectory";
 
     out.emit(.{
