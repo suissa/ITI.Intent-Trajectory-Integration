@@ -285,3 +285,277 @@ test "probeAll isolates adapter failures and returns only capable adapters" {
     try std.testing.expectEqual(@as(usize, 1), first.calls);
     try std.testing.expectEqual(@as(usize, 1), second.calls);
 }
+
+
+pub const AdapterDescriptor = struct {
+    id: []const u8,
+    driver: []const u8,
+    capabilities: CapabilitySet = .{},
+    endpoint_env: []const u8 = "",
+    credential_env: []const u8 = "",
+};
+
+pub const ResolvedConfig = struct {
+    endpoint: ?[]const u8 = null,
+    credential: ?[]const u8 = null,
+};
+
+pub const FactoryFn = *const fn (
+    context: ?*anyopaque,
+    allocator: std.mem.Allocator,
+    descriptor: AdapterDescriptor,
+    resolved: ResolvedConfig,
+    io: std.Io,
+) anyerror!Adapter;
+
+pub const DriverFactory = struct {
+    name: []const u8,
+    context: ?*anyopaque = null,
+    create_fn: FactoryFn,
+};
+
+/// Owns the adapter registry and driver-factory instances for one ITI process.
+pub const Runtime = struct {
+    arena: std.heap.ArenaAllocator,
+    registry: Registry,
+    factories: std.ArrayListUnmanaged(DriverFactory) = .empty,
+
+    pub fn init(parent_allocator: std.mem.Allocator) !Runtime {
+        var arena = std.heap.ArenaAllocator.init(parent_allocator);
+        errdefer arena.deinit();
+        var runtime = Runtime{
+            .arena = arena,
+            .registry = Registry.init(arena.allocator()),
+        };
+        try runtime.registerFactory("memory", null, createMemoryAdapter);
+        return runtime;
+    }
+
+    pub fn deinit(self: *Runtime) void {
+        const allocator = self.arena.allocator();
+        self.registry.deinit();
+        self.factories.deinit(allocator);
+        self.arena.deinit();
+    }
+
+    pub fn registerFactory(self: *Runtime, name: []const u8, context: ?*anyopaque, create_fn: FactoryFn) !void {
+        if (name.len == 0) return error.InvalidDriverName;
+        for (self.factories.items) |factory| {
+            if (std.mem.eql(u8, factory.name, name)) return error.DuplicateDriverFactory;
+        }
+        try self.factories.append(self.arena.allocator(), .{
+            .name = name,
+            .context = context,
+            .create_fn = create_fn,
+        });
+    }
+
+    pub fn load(
+        self: *Runtime,
+        source: []const u8,
+        environ: *const std.process.Environ.Map,
+        io: std.Io,
+    ) !void {
+        const allocator = self.arena.allocator();
+        const descriptors = try parseConfig(allocator, source);
+        defer allocator.free(descriptors);
+
+        const original_adapter_count = self.registry.adapters.items.len;
+        errdefer self.registry.adapters.items.len = original_adapter_count;
+
+        for (descriptors) |descriptor| {
+            const factory = self.findFactory(descriptor.driver) orelse return error.UnknownDriver;
+            const resolved = ResolvedConfig{
+                .endpoint = if (descriptor.endpoint_env.len == 0)
+                    null
+                else
+                    environ.get(descriptor.endpoint_env) orelse return error.MissingEndpointEnvironmentVariable,
+                .credential = if (descriptor.credential_env.len == 0)
+                    null
+                else
+                    environ.get(descriptor.credential_env) orelse return error.MissingCredentialEnvironmentVariable,
+            };
+            if (resolved.endpoint) |endpoint| {
+                if (endpoint.len == 0) return error.EmptyEndpointEnvironmentVariable;
+            }
+            if (resolved.credential) |credential| {
+                if (credential.len == 0) return error.EmptyCredentialEnvironmentVariable;
+            }
+
+            const adapter = try factory.create_fn(factory.context, allocator, descriptor, resolved, io);
+            try self.registry.register(adapter);
+        }
+    }
+
+    fn findFactory(self: *Runtime, name: []const u8) ?DriverFactory {
+        for (self.factories.items) |factory| {
+            if (std.mem.eql(u8, factory.name, name)) return factory;
+        }
+        return null;
+    }
+};
+
+pub fn parseConfig(allocator: std.mem.Allocator, source: []const u8) ![]AdapterDescriptor {
+    var descriptors: std.ArrayListUnmanaged(AdapterDescriptor) = .empty;
+    errdefer descriptors.deinit(allocator);
+    var current: ?AdapterDescriptor = null;
+
+    var lines = std.mem.splitScalar(u8, source, '\n');
+    while (lines.next()) |raw_line| {
+        var line = std.mem.trim(u8, raw_line, " \t\r");
+        if (std.mem.indexOfScalar(u8, line, '#')) |comment| line = std.mem.trim(u8, line[0..comment], " \t\r");
+        if (line.len == 0) continue;
+
+        var tokens = std.mem.tokenizeAny(u8, line, " \t");
+        const directive = tokens.next() orelse continue;
+        if (std.mem.eql(u8, directive, "adapter")) {
+            if (current) |descriptor| try appendDescriptor(&descriptors, allocator, descriptor);
+            const id = tokens.next() orelse return error.InvalidAdapterDirective;
+            const driver = tokens.next() orelse return error.InvalidAdapterDirective;
+            if (tokens.next() != null) return error.InvalidAdapterDirective;
+            current = .{ .id = id, .driver = driver };
+            continue;
+        }
+
+        const descriptor = if (current) |*value| value else return error.DirectiveBeforeAdapter;
+        if (std.mem.eql(u8, directive, "capabilities")) {
+            var count: usize = 0;
+            while (tokens.next()) |name| {
+                const capability = std.meta.stringToEnum(Capability, name) orelse return error.UnknownCapability;
+                descriptor.capabilities.add(capability);
+                count += 1;
+            }
+            if (count == 0) return error.EmptyCapabilities;
+        } else if (std.mem.eql(u8, directive, "endpoint-env")) {
+            if (descriptor.endpoint_env.len > 0) return error.DuplicateEndpointEnvironmentVariable;
+            descriptor.endpoint_env = tokens.next() orelse return error.InvalidEnvironmentDirective;
+            if (tokens.next() != null) return error.InvalidEnvironmentDirective;
+        } else if (std.mem.eql(u8, directive, "credential-env")) {
+            if (descriptor.credential_env.len > 0) return error.DuplicateCredentialEnvironmentVariable;
+            descriptor.credential_env = tokens.next() orelse return error.InvalidEnvironmentDirective;
+            if (tokens.next() != null) return error.InvalidEnvironmentDirective;
+        } else {
+            return error.UnknownConfigDirective;
+        }
+    }
+
+    if (current) |descriptor| try appendDescriptor(&descriptors, allocator, descriptor);
+    return descriptors.toOwnedSlice(allocator);
+}
+
+fn appendDescriptor(
+    descriptors: *std.ArrayListUnmanaged(AdapterDescriptor),
+    allocator: std.mem.Allocator,
+    descriptor: AdapterDescriptor,
+) !void {
+    if (descriptor.id.len == 0 or descriptor.driver.len == 0) return error.InvalidAdapterDescriptor;
+    if (descriptor.capabilities.count() == 0) return error.EmptyCapabilities;
+    for (descriptors.items) |existing| {
+        if (std.mem.eql(u8, existing.id, descriptor.id)) return error.DuplicateAdapterId;
+    }
+    try descriptors.append(allocator, descriptor);
+}
+
+fn createMemoryAdapter(
+    context: ?*anyopaque,
+    allocator: std.mem.Allocator,
+    descriptor: AdapterDescriptor,
+    resolved: ResolvedConfig,
+    io: std.Io,
+) anyerror!Adapter {
+    _ = context;
+    _ = resolved;
+    _ = io;
+    const memory = try allocator.create(MemoryAdapter);
+    memory.* = .{};
+    return memory.asAdapter(descriptor.id, descriptor.capabilities);
+}
+
+test "DataPlane config parses adapters, capabilities and environment references" {
+    const source =
+        "# local test adapter\n" ++
+        "adapter primary memory\n" ++
+        "capabilities read write cache\n" ++
+        "endpoint-env ITI_DATA_ENDPOINT\n" ++
+        "credential-env ITI_DATA_TOKEN\n" ++
+        "adapter archive memory\n" ++
+        "capabilities read graph\n";
+    const descriptors = try parseConfig(std.testing.allocator, source);
+    defer std.testing.allocator.free(descriptors);
+
+    try std.testing.expectEqual(@as(usize, 2), descriptors.len);
+    try std.testing.expectEqualStrings("primary", descriptors[0].id);
+    try std.testing.expectEqualStrings("memory", descriptors[0].driver);
+    try std.testing.expect(descriptors[0].capabilities.contains(.write));
+    try std.testing.expectEqualStrings("ITI_DATA_ENDPOINT", descriptors[0].endpoint_env);
+    try std.testing.expectEqualStrings("ITI_DATA_TOKEN", descriptors[0].credential_env);
+    try std.testing.expectEqualStrings("archive", descriptors[1].id);
+    try std.testing.expect(descriptors[1].capabilities.contains(.graph));
+}
+
+test "DataPlane config rejects invalid directives and duplicate IDs" {
+    try std.testing.expectError(error.DirectiveBeforeAdapter, parseConfig(std.testing.allocator, "capabilities read"));
+    try std.testing.expectError(error.UnknownCapability, parseConfig(std.testing.allocator, "adapter bad memory\ncapabilities read database"));
+    try std.testing.expectError(error.DuplicateAdapterId, parseConfig(std.testing.allocator, "adapter same memory\ncapabilities read\nadapter same memory\ncapabilities write"));
+}
+
+test "DataPlane runtime resolves configured environment values without exposing them in probe results" {
+    const Capture = struct {
+        endpoint: []const u8 = "",
+        credential: []const u8 = "",
+    };
+    const captureFactory = struct {
+        fn create(
+            context: ?*anyopaque,
+            allocator: std.mem.Allocator,
+            descriptor: AdapterDescriptor,
+            resolved: ResolvedConfig,
+            io: std.Io,
+        ) anyerror!Adapter {
+            _ = io;
+            const capture: *Capture = @ptrCast(@alignCast(context.?));
+            capture.endpoint = resolved.endpoint orelse "";
+            capture.credential = resolved.credential orelse "";
+            const memory = try allocator.create(MemoryAdapter);
+            memory.* = .{};
+            return memory.asAdapter(descriptor.id, descriptor.capabilities);
+        }
+    }.create;
+
+    var environ = std.process.Environ.Map.init(std.testing.allocator);
+    defer environ.deinit();
+    try environ.put("ITI_DATA_ENDPOINT", "https://data.internal");
+    try environ.put("ITI_DATA_TOKEN", "super-secret-token");
+
+    var capture = Capture{};
+    var runtime = try Runtime.init(std.testing.allocator);
+    defer runtime.deinit();
+    try runtime.registerFactory("capture", &capture, captureFactory);
+    try runtime.load(
+        "adapter primary capture\ncapabilities read\nendpoint-env ITI_DATA_ENDPOINT\ncredential-env ITI_DATA_TOKEN\n",
+        &environ,
+        std.testing.io,
+    );
+
+    try std.testing.expectEqualStrings("https://data.internal", capture.endpoint);
+    try std.testing.expectEqualStrings("super-secret-token", capture.credential);
+    const outcome = try runtime.registry.probe("primary", .read, std.testing.io, .{ .correlation_id = "corr-config" });
+    try std.testing.expectEqual(ProbeStatus.passed, outcome.result.status);
+    try std.testing.expect(std.mem.indexOf(u8, outcome.result.detail, "super-secret-token") == null);
+}
+
+test "DataPlane runtime rejects missing secrets and unknown driver factories" {
+    var environ = std.process.Environ.Map.init(std.testing.allocator);
+    defer environ.deinit();
+
+    var runtime = try Runtime.init(std.testing.allocator);
+    defer runtime.deinit();
+    try std.testing.expectError(
+        error.MissingCredentialEnvironmentVariable,
+        runtime.load("adapter primary memory\ncapabilities read\ncredential-env ITI_DATA_TOKEN\n", &environ, std.testing.io),
+    );
+    try std.testing.expectError(
+        error.UnknownDriver,
+        runtime.load("adapter primary postgres\ncapabilities read\n", &environ, std.testing.io),
+    );
+}
