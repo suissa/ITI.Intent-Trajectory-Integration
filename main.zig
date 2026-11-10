@@ -7,6 +7,7 @@ const runner = @import("src/runner.zig");
 const dashboard = @import("src/dashboard.zig");
 const websocket = @import("src/websocket.zig");
 const opentrajectory = @import("src/opentrajectory.zig");
+const browser_mod = @import("src/browser.zig");
 
 const source = @embedFile(build_options.spec);
 
@@ -86,6 +87,12 @@ pub fn main(init: std.process.Init) !void {
         .second = exporter.eventSink(),
     };
     const sink = fanout.eventSink();
+    var browser_runtime: ?browser_mod.Browser = null;
+    if (selected_profile.e2e) {
+        browser_runtime = try browser_mod.Browser.connectOrStart(init.gpa, init.io, init.environ_map);
+    }
+    defer if (browser_runtime) |*runtime| runtime.deinit();
+    const browser: ?*browser_mod.Browser = if (browser_runtime) |*runtime| runtime else null;
     std.debug.print(
         "ITI — Intent Trajectory Integration\nSpec: {s}\nProfile: {s}\nUI: {s}\n\n",
         .{ build_options.spec, build_options.profile, build_options.ui },
@@ -98,9 +105,9 @@ pub fn main(init: std.process.Init) !void {
             build_options.spec,
             build_options.profile,
         );
-        try dashboard.run(suite, .tui, sink, semantic_context, init.gpa, init.io);
+        try dashboard.run(suite, .tui, sink, semantic_context, init.gpa, init.io, browser);
         return;
     }
 
-    runner.runParsed(parsed_spec, selected_profile, selected_projection, build_options.profile, sink, semantic_context);
+    runner.runParsed(parsed_spec, selected_profile, selected_projection, build_options.profile, sink, semantic_context, browser);
 }
