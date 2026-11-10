@@ -85,7 +85,7 @@ const TrackState = struct {
     status: []const u8 = "running",
     depth: usize = 0,
     sequence: usize,
-    started_ns: u64,
+    started_ns: i96,
     attributes: OtdAttributes,
     expansions: std.ArrayListUnmanaged(OtdExpansion) = .empty,
     failure: ?OtdError = null,
@@ -114,12 +114,12 @@ pub const Exporter = struct {
     io: Io,
     session_id: []const u8,
     enabled: bool,
-    process_started_ns: u64,
+    process_started_ns: i96,
     sequence: usize = 0,
     trajectory_id: []const u8 = "",
     trajectory_name: []const u8 = "",
     trajectory_started_at: []const u8 = "",
-    trajectory_started_ns: u64 = 0,
+    trajectory_started_ns: i96 = 0,
     trajectory_ended_at: ?[]const u8 = null,
     trajectory_duration_ms: ?u64 = null,
     trajectory_status: []const u8 = "running",
@@ -287,7 +287,7 @@ pub const Exporter = struct {
         const ended_at = try timestamp(self.allocator());
         const now = nowNs(self.io);
         track.ended_at = ended_at;
-        track.duration_ms = if (now >= track.started_ns) (now - track.started_ns) / 1_000_000 else 0;
+        track.duration_ms = if (now >= track.started_ns) @intCast(@divTrunc(now - track.started_ns, 1_000_000)) else 0;
         track.status = if (event.status == .failed) "error" else "ok";
         if (event.status == .failed) {
             track.failure = .{ .name = "AssertionError", .message = event.name };
@@ -301,7 +301,7 @@ pub const Exporter = struct {
         const now = nowNs(self.io);
         self.trajectory_ended_at = ended_at;
         self.trajectory_duration_ms = if (now >= self.trajectory_started_ns)
-            (now - self.trajectory_started_ns) / 1_000_000
+            @intCast(@divTrunc(now - self.trajectory_started_ns, 1_000_000))
         else
             0;
         self.trajectory_status = if (event.status == .failed) "error" else "ok";
@@ -342,7 +342,7 @@ pub const Exporter = struct {
             .timestamp = try timestamp(self.allocator()),
             .offsetMs = blk: {
                 const now = nowNs(self.io);
-                break :blk if (now >= track.started_ns) (now - track.started_ns) / 1_000_000 else 0;
+                break :blk if (now >= track.started_ns) @as(u64, @intCast(@divTrunc(now - track.started_ns, 1_000_000))) else 0;
             },
             .attributes = self.attributes(semantic, track.sequence, track.name),
         };
@@ -411,7 +411,7 @@ pub const Exporter = struct {
             self.snapshot_tracks.append(self.allocator(), track.snapshot(self.trajectory_id)) catch {};
         }
         const now = nowNs(self.io);
-        const uptime = if (now >= self.process_started_ns) (now - self.process_started_ns) / 1_000_000 else 0;
+        const uptime = if (now >= self.process_started_ns) @as(u64, @intCast(@divTrunc(now - self.process_started_ns, 1_000_000))) else 0;
         return .{
             .id = self.trajectory_id,
             .name = self.trajectory_name,
@@ -429,7 +429,8 @@ pub const Exporter = struct {
         };
     }
 
-    fn writeEvent(self: *Exporter, comptime Payload: type, event_type: []const u8, payload: Payload) !void {
+    fn writeEvent(self: *Exporter, event_type: []const u8, payload: anytype) !void {
+        const Payload = @TypeOf(payload);
         self.sequence += 1;
         const event_timestamp = try timestamp(self.allocator());
         const Envelope = struct {
@@ -460,7 +461,7 @@ pub const Exporter = struct {
     }
 };
 
-fn nowNs(io: Io) u64 {
+fn nowNs(io: Io) i96 {
     return std.Io.Clock.awake.now(io).nanoseconds;
 }
 
