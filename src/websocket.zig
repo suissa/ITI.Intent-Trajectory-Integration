@@ -426,3 +426,23 @@ test "Console and WebSocket hub share the same sequence source" {
     try std.testing.expectEqual(@as(usize, 2), batch.sequence);
     try std.testing.expectEqual(batch.events[1].sequence, console.sequence);
 }
+
+test "subscribe parser owns session ID after releasing parsed JSON" {
+    const request = parseSubscribe(
+        std.testing.allocator,
+        "{\"type\":\"subscribe\",\"sessionId\":\"0123456789abcdef0123456789abcdef\",\"afterSequence\":17}",
+    ) orelse return error.InvalidSubscribeRequest;
+    try std.testing.expectEqual(@as(usize, 17), request.after_sequence);
+    try std.testing.expectEqualStrings(
+        "0123456789abcdef0123456789abcdef",
+        request.session_id[0..request.session_id_len],
+    );
+}
+
+test "subscribe parser rejects session IDs longer than the protocol field" {
+    const request = parseSubscribe(
+        std.testing.allocator,
+        "{\"type\":\"subscribe\",\"sessionId\":\"0123456789abcdef0123456789abcdef-extra\",\"afterSequence\":1}",
+    );
+    try std.testing.expect(request == null);
+}
