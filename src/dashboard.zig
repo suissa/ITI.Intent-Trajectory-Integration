@@ -919,10 +919,9 @@ pub fn run(
     suite: []const SuiteEntry,
     projection: trajectory.Projection,
     sink: ?trajectory.EventSink,
+    allocator: std.mem.Allocator,
+    io: std.Io,
 ) !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
 
     var term = try tui.terminal.Terminal.init(.{});
     defer term.deinit();
@@ -944,13 +943,13 @@ pub fn run(
     _ = theme;
 
     const frame_ns: i128 = 25_000_000; // ~40 fps
-    var next_frame = std.time.nanoTimestamp();
+    var next_frame: i128 = @intCast(std.Io.Clock.awake.now(io).nanoseconds);
 
     while (true) {
         // Poll input without blocking (termios VTIME gives us a ~100ms window).
-        const stdin = std.fs.File{ .handle = std.posix.STDIN_FILENO };
+        const stdin = std.Io.File.stdin();
         var buf: [64]u8 = undefined;
-        const n = stdin.read(&buf) catch 0;
+        const n = stdin.readStreaming(io, &.{&buf}) catch 0;
         if (n > 0) {
             if (try reader.parse(buf[0..n])) |event| {
                 // Global quit keys.
@@ -972,9 +971,9 @@ pub fn run(
 
         // Advance the real runner while the system is RUNNING.
         if (dash.state == .running) {
-            const tick_start = std.time.nanoTimestamp();
+            const tick_start = std.Io.Clock.awake.now(io);
             _ = dash.emitNextEvent(&console);
-            dash.elapsed_ms += @intCast(@divTrunc(std.time.nanoTimestamp() - tick_start, 1_000_000));
+            dash.elapsed_ms += @intCast(tick_start.untilNow(io, .awake).toMilliseconds());
         }
 
         // Render.
@@ -985,15 +984,15 @@ pub fn run(
             .bounds = .{ .x = 0, .y = 0, .width = scr.width, .height = scr.height },
             .clip = .{ .x = 0, .y = 0, .width = scr.width, .height = scr.height },
             .focused_id = null,
-            .time_ns = @intCast(std.time.nanoTimestamp()),
+            .time_ns = @intCast(std.Io.Clock.awake.now(io).nanoseconds),
         };
         dash.render(&ctx);
         try rend.render(&scr);
 
         next_frame += frame_ns;
-        const now = std.time.nanoTimestamp();
+        const now: i128 = @intCast(std.Io.Clock.awake.now(io).nanoseconds);
         if (next_frame > now) {
-            std.Thread.sleep(@intCast(next_frame - now));
+            try io.sleep(.fromNanoseconds(@intCast(next_frame - now)), .awake);
         } else {
             next_frame = now;
         }
@@ -1005,7 +1004,6 @@ pub fn run(
 // ============================================
 
 pub fn main(init: std.process.Init) !void {
-    _ = init;
     const build_options = @import("build_options");
 
     const parsed_spec = blk: {
@@ -1016,9 +1014,9 @@ pub fn main(init: std.process.Init) !void {
         @setEvalBranchQuota(10_000);
         break :blk profile_mod.fromName(build_options.profile);
     };
-    const suite = buildSuite(parsed_spec.steps, selected_profile, build_options.spec, build_options.profile);
+    const suite = buildSuite(&parsed_spec.steps, &profileProbes(selected_profile), build_options.spec, build_options.profile);
 
-    try run(suite, .tui, null);
+    try run(suite, .tui, null, init.gpa, init.io);
 }
 
 // ============================================
