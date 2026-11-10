@@ -21,7 +21,10 @@ pub const Client = struct {
             .session_id = "",
         };
 
-        const created = try client.command("Target.createTarget", .{ .url = "about:blank" }, null);
+        const created = client.command("Target.createTarget", .{ .url = "about:blank" }, null) catch |err| {
+            std.debug.print("ITI CDP Target.createTarget: {s}\\n", .{@errorName(err)});
+            return err;
+        };
         defer created.deinit();
         const created_result = created.value.object.get("result") orelse return error.InvalidCdpResponse;
         const target_value = created_result.object.get("targetId") orelse return error.InvalidCdpResponse;
@@ -30,10 +33,13 @@ pub const Client = struct {
         client.target_id = try allocator.dupe(u8, target);
         errdefer allocator.free(client.target_id);
 
-        const attached = try client.command("Target.attachToTarget", .{
+        const attached = client.command("Target.attachToTarget", .{
             .targetId = client.target_id,
             .flatten = true,
-        }, null);
+        }, null) catch |err| {
+            std.debug.print("ITI CDP Target.attachToTarget: {s}\\n", .{@errorName(err)});
+            return err;
+        };
         defer attached.deinit();
         const attached_result = attached.value.object.get("result") orelse return error.InvalidCdpResponse;
         const session_value = attached_result.object.get("sessionId") orelse return error.InvalidCdpResponse;
@@ -42,9 +48,15 @@ pub const Client = struct {
         client.session_id = try allocator.dupe(u8, session);
         errdefer allocator.free(client.session_id);
 
-        const page_enabled = try client.command("Page.enable", .{}, client.session_id);
+        const page_enabled = client.command("Page.enable", .{}, client.session_id) catch |err| {
+            std.debug.print("ITI CDP Page.enable: {s}\\n", .{@errorName(err)});
+            return err;
+        };
         page_enabled.deinit();
-        const runtime_enabled = try client.command("Runtime.enable", .{}, client.session_id);
+        const runtime_enabled = client.command("Runtime.enable", .{}, client.session_id) catch |err| {
+            std.debug.print("ITI CDP Runtime.enable: {s}\\n", .{@errorName(err)});
+            return err;
+        };
         runtime_enabled.deinit();
 
         return client;
