@@ -125,10 +125,17 @@ Implemented:
 - compile-time test profiles.
 - `full` profile covering intent/unit/integration/E2E/data/performance/discovery selection.
 - OpenTrajectory-compatible Trajectory / Track / Expansion event model.
-- append-only NDJSON output suitable for realtime consumers.\n- terminal projection using the same Trajectory event stream.\n- Web Dashboard shell in `web/index.html`, ready to consume the same events over WebSocket.
-- DSL parser tests.
+- append-only NDJSON output suitable for realtime consumers.
+- terminal projection using the same Trajectory event stream.
+- live WebSocket hub and browser dashboard consuming the shared event stream.
+- Lightpanda CDP executor for navigation, typing, clicking, and destination assertions.
+- actor-value resolution through environment variables.
+- per-browser-step benchmark samples.
+- OpenTrajectory.Digital exporter with semantic identity and causal relations.
+- Destination snapshots and exporter regression tests.
+- Zig 0.16 CI plus a real Lightpanda E2E smoke test.
 
-Next runtime adapters are documented in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): real Lightpanda CDP execution, WebSocket server, OpenTrajectory exporter, and concrete data-plane probes.
+The remaining adapter work is focused on concrete data-plane probes and additional browser interaction strategies; see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 
 ## Lightpanda CDP E2E runtime
