@@ -327,7 +327,7 @@ pub const Dashboard = struct {
             switch (phase) {
                 0 => {
                     self.log(.debug, "TRK", "track_started", step.raw, tui.Color.hex(0x8BE9FD));
-                    out.emit(.{ .kind = .track_started, .trajectory = trajectory_name, .track = track, .name = step.raw });
+                    out.emit(.{ .kind = .track_started, .trajectory = trajectory_name, .track = track, .name = step.raw, .track_index = si + 1 });
                 },
                 1 => {
                     if (step.kind == .hope or step.kind == .hope_see) {
