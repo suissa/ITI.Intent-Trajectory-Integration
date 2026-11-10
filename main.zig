@@ -111,9 +111,9 @@ pub fn main(init: std.process.Init) !void {
             build_options.spec,
             build_options.profile,
         );
-        try dashboard.run(suite, .tui, sink, semantic_context, init.gpa, init.io, browser);
+        try dashboard.run(suite, .tui, sink, semantic_context, init.gpa, init.io, browser, &data_plane_runtime);
         return;
     }
 
-    try runner.runParsed(parsed_spec, selected_profile, selected_projection, build_options.profile, sink, semantic_context, browser);
+    try runner.runParsed(parsed_spec, selected_profile, selected_projection, build_options.profile, sink, semantic_context, browser, &data_plane_runtime, init.io);
 }
