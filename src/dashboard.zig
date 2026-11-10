@@ -232,7 +232,7 @@ pub const Dashboard = struct {
 
     fn totalEvents(self: *Dashboard) void {
         var total: usize = 0;
-        for (self.suite) |entry| total += entry.steps.len + entry.probes.len + 4;
+        for (self.suite) |entry| total += 4 * entry.steps.len + entry.probes.len + 4;
         self.total_events = total;
     }
 
@@ -306,7 +306,7 @@ pub const Dashboard = struct {
         const expansion_assert_count = steps.len;
         const track_finished_count = steps.len;
         const probes_count = probes.len;
-        const per_test = 4 * steps.len + probes_count + 4;
+        const per_test = 2 + 4 * steps.len + probes_count + 4;
 
         var test_index: usize = 0;
         var base: usize = 0;
@@ -317,8 +317,10 @@ pub const Dashboard = struct {
         if (base + per_test <= self.emitted_events) return false;
 
         const i = self.emitted_events - base;
-        const step_index = if (i < 4 * steps.len) (i / 4) else null;
-        const phase = if (i < 4 * steps.len) (i % 4) else 0;
+        const step_events = 4 * steps.len;
+        const relative_step_event = if (i >= 2) i - 2 else 0;
+        const step_index = if (i >= 2 and relative_step_event < step_events) (relative_step_event / 4) else null;
+        const phase = if (i >= 2 and relative_step_event < step_events) (relative_step_event % 4) else 0;
 
         if (i == 0) {
             self.log(.info, "RUN", "run_started", entry.name, tui.Color.hex(0xBD93F9));
@@ -403,8 +405,8 @@ pub const Dashboard = struct {
                     });
                 },
             }
-        } else if (i >= 4 * steps.len and i < 4 * steps.len + probes_count) {
-            const pi = i - 4 * steps.len;
+        } else if (i >= 2 + 4 * steps.len and i < 2 + 4 * steps.len + probes_count) {
+            const pi = i - 2 - 4 * steps.len;
             const probe = probes[pi];
             const label = switch (probe.kind) {
                 .data_probe => "DAT",
@@ -419,10 +421,10 @@ pub const Dashboard = struct {
                 .name = "selected",
                 .status = .observed,
             });
-        } else if (i == 4 * steps.len + probes_count) {
+        } else if (i == 2 + 4 * steps.len + probes_count) {
             self.log(if (self.run_failed) .warn else .info, "TRJ", "trajectory_finished", trajectory_name, tui.Color.hex(if (self.run_failed) 0xFF5555 else 0x50FA7B));
             out.emit(.{ .kind = .trajectory_finished, .trajectory = trajectory_name, .status = if (self.run_failed) .failed else .passed });
-        } else if (i == 4 * steps.len + probes_count + 1) {
+        } else if (i == 2 + 4 * steps.len + probes_count + 1) {
             self.log(if (self.run_failed) .warn else .success, "RUN", "run_finished", entry.name, tui.Color.hex(if (self.run_failed) 0xFF5555 else 0x50FA7B));
             out.emit(.{ .kind = .run_finished, .trajectory = trajectory_name, .status = if (self.run_failed) .failed else .passed });
         } else {
