@@ -17,6 +17,7 @@ pub const Browser = struct {
             return .{ .allocator = allocator, .io = io, .environ = environ, .client = client };
         } else |err| {
             std.debug.print("ITI CDP initial connection: {s}\\n", .{@errorName(err)});
+            if (cdp.endpointListening()) return err;
         }
 
         try startLightpanda(allocator, io);
