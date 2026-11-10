@@ -1,3 +1,4 @@
+const std = @import("std");
 const dsl = @import("dsl.zig");
 const profile_mod = @import("profile.zig");
 const trajectory = @import("trajectory.zig");
