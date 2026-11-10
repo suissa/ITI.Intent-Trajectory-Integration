@@ -1,4 +1,5 @@
 const std = @import("std");
+
 const c_socket = @extern(*const fn (c_int, c_int, c_int) callconv(.c) c_int, .{ .name = "socket" });
 const c_connect = @extern(*const fn (c_int, *const anyopaque, u32) callconv(.c) c_int, .{ .name = "connect" });
 const c_read = @extern(*const fn (c_int, [*]u8, usize) callconv(.c) isize, .{ .name = "read" });
@@ -12,19 +13,13 @@ const SockAddrIn = extern struct {
     zero: [8]u8,
 };
 
-/// Pure Zig WebSocket client for CDP communication.
-/// Implements RFC 6455: HTTP upgrade handshake, masked client frames, unmasked server reads.
+const websocket_guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
 pub const WebSocketClient = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
     fd: c_int,
-    connected: bool,
-
-    // Buffer owned by caller (stack or heap). `write_buf` used to live here
-    // too, but nothing ever read it -- `writeFrame` builds frames with its
-    // own local stack buffers (`frame_buf`, `chunk`); removed as dead
-    // storage rather than carried along for a "symmetric" API.
-    read_buf: []u8,
+    connected: bool = true,
 
     pub const Error = error{
         ConnectionFailed,
@@ -36,452 +31,222 @@ pub const WebSocketClient = struct {
         InvalidFrame,
     };
 
-    /// Connect to a loopback WebSocket endpoint. url must be like "ws://host:port/path".
-    pub fn connect(allocator: std.mem.Allocator, io: std.Io, url: []const u8, read_buf: []u8) !WebSocketClient {
+    /// Open the local Lightpanda CDP endpoint. The transport deliberately refuses non-loopback hosts.
+    pub fn connect(allocator: std.mem.Allocator, io: std.Io) !WebSocketClient {
         if (@import("builtin").os.tag == .windows) return Error.ConnectionFailed;
-        const parsed = try parseWsUrl(url);
 
-        // Resolve localhost to 127.0.0.1 — resolveIp fails on some systems
-        const resolved_host = if (std.mem.eql(u8, parsed.host, "localhost")) "127.0.0.1" else parsed.host;
-        const ip_addr = parseIp4(resolved_host) orelse return Error.ConnectionFailed;
-
-        const raw_fd = c_socket(2, 1, 0);
-        if (raw_fd < 0) return Error.ConnectionFailed;
-        const fd: c_int = raw_fd;
+        const fd = c_socket(2, 1, 0);
+        if (fd < 0) return Error.ConnectionFailed;
         errdefer _ = c_close(fd);
 
-        var addr: SockAddrIn = .{
+        var address = SockAddrIn{
             .family = 2,
-            .port = std.mem.nativeToBig(u16, parsed.port),
-            .address = ip_addr,
+            .port = std.mem.nativeToBig(u16, 9222),
+            .address = std.mem.nativeToBig(u32, 0x7f000001),
             .zero = @splat(0),
         };
-        if (c_connect(fd, @ptrCast(&addr), @sizeOf(SockAddrIn)) != 0) {
+        if (c_connect(fd, @ptrCast(&address), @sizeOf(SockAddrIn)) != 0) {
             return Error.ConnectionFailed;
         }
 
-        var ws = WebSocketClient{
+        var client = WebSocketClient{
             .allocator = allocator,
             .io = io,
             .fd = fd,
-            .connected = false,
-            .read_buf = read_buf,
         };
-
-        try ws.doHandshake(io, parsed.host, parsed.port, parsed.path);
-        ws.connected = true;
-
-        return ws;
+        try client.upgrade();
+        return client;
     }
 
-    /// Send a text message (masked, as required for WebSocket clients).
-    pub fn sendText(self: *WebSocketClient, data: []const u8) !void {
-        if (!self.connected) return Error.ConnectionFailed;
-        try self.writeFrame(0x1, data); // opcode 1 = text
-    }
-
-    /// Receive the next text message. Returns slice into internal read_buf.
-    /// Caller must copy if they need the data to persist across calls.
-    pub fn receiveMessage(self: *WebSocketClient) ![]u8 {
-        if (!self.connected) return Error.ConnectionFailed;
-        return self.readFrame();
-    }
-
-    /// Receive a large message that may exceed read_buf. Allocates result.
-    pub fn receiveMessageAlloc(self: *WebSocketClient, allocator: std.mem.Allocator, max_size: usize) ![]u8 {
-        if (!self.connected) return Error.ConnectionFailed;
-        return self.readFrameAlloc(allocator, max_size);
-    }
-
-    pub fn close(self: *WebSocketClient) void {
-        if (self.connected) {
-            // Send close frame (opcode 8), best effort
-            self.writeFrame(0x8, &.{}) catch {};
-            self.connected = false;
-        }
+    pub fn deinit(self: *WebSocketClient) void {
+        if (!self.connected) return;
+        self.sendFrame(0x8, &.{}) catch {};
+        self.connected = false;
         _ = c_close(self.fd);
     }
 
-    // --- Internal ---
-
-    const WsUrl = struct {
-        host: []const u8,
-        port: u16,
-        path: []const u8,
-    };
-
-    pub fn parseWsUrl(url: []const u8) !WsUrl {
-        if (std.mem.startsWith(u8, url, "wss://")) return error.UnsupportedWsScheme;
-
-        // Strip "ws://"
-        const after_scheme = if (std.mem.startsWith(u8, url, "ws://"))
-            url[5..]
-        else
-            return error.InvalidCharacter;
-
-        // Find path separator
-        const path_start = std.mem.indexOfScalar(u8, after_scheme, '/') orelse after_scheme.len;
-        const host_port = after_scheme[0..path_start];
-        const path = if (path_start < after_scheme.len) after_scheme[path_start..] else "/";
-
-        const host_port_parsed = parseHostPort(host_port) orelse return error.InvalidCharacter;
-        if (!isSupportedLoopbackHost(host_port_parsed.host)) return error.UnsupportedWsHost;
-
-        return .{
-            .host = host_port_parsed.host,
-            .port = host_port_parsed.port,
-            .path = path,
-        };
+    pub fn sendText(self: *WebSocketClient, payload: []const u8) !void {
+        if (!self.connected) return Error.ConnectionClosed;
+        try self.sendFrame(0x1, payload);
     }
 
-    fn parseHostPort(host_port: []const u8) ?struct { host: []const u8, port: u16 } {
-        if (host_port.len == 0) return null;
-
-        var host = host_port;
-        var port: u16 = 80;
-
-        if (host_port[0] == '[') {
-            const bracket_end = std.mem.indexOfScalar(u8, host_port, ']') orelse return null;
-            host = host_port[1..bracket_end];
-            const suffix = host_port[bracket_end + 1 ..];
-            if (suffix.len > 0) {
-                if (suffix[0] != ':' or suffix.len == 1) return null;
-                port = std.fmt.parseInt(u16, suffix[1..], 10) catch return null;
-            }
-        } else if (std.mem.lastIndexOfScalar(u8, host_port, ':')) |colon| {
-            host = host_port[0..colon];
-            if (std.mem.indexOfScalar(u8, host, ':') != null) return null;
-            const port_text = host_port[colon + 1 ..];
-            if (port_text.len == 0) return null;
-            port = std.fmt.parseInt(u16, port_text, 10) catch return null;
-        }
-
-        if (host.len == 0) return null;
-        return .{ .host = host, .port = port };
+    pub fn receiveMessageAlloc(self: *WebSocketClient, allocator: std.mem.Allocator, max_size: usize) ![]u8 {
+        if (!self.connected) return Error.ConnectionClosed;
+        return self.readFrameAlloc(allocator, max_size);
     }
 
-    fn isSupportedLoopbackHost(host: []const u8) bool {
-        return std.mem.eql(u8, host, "localhost") or std.mem.eql(u8, host, "127.0.0.1");
-    }
+    fn upgrade(self: *WebSocketClient) !void {
+        var nonce: [16]u8 = undefined;
+        self.io.random(&nonce);
+        var key_buffer: [24]u8 = undefined;
+        const key = std.base64.standard.Encoder.encode(&key_buffer, &nonce);
 
-    /// Parse an IPv4 dotted-decimal string into a network-byte-order u32.
-    fn parseIp4(s: []const u8) ?u32 {
-        var octets: [4]u8 = undefined;
-        var octet_idx: usize = 0;
-        var cur: u16 = 0;
-        var digit_count: u8 = 0;
-        for (s) |ch| {
-            if (ch == '.') {
-                if (digit_count == 0 or octet_idx >= 3) return null;
-                octets[octet_idx] = @intCast(cur);
-                octet_idx += 1;
-                cur = 0;
-                digit_count = 0;
-            } else if (ch >= '0' and ch <= '9') {
-                cur = cur * 10 + (ch - '0');
-                if (cur > 255) return null;
-                digit_count += 1;
-            } else {
-                return null;
-            }
-        }
-        if (digit_count == 0 or octet_idx != 3) return null;
-        octets[3] = @intCast(cur);
-        const host_order =
-            @as(u32, octets[0]) << 24 |
-            @as(u32, octets[1]) << 16 |
-            @as(u32, octets[2]) << 8 |
-            @as(u32, octets[3]);
-        return std.mem.nativeToBig(u32, host_order);
-    }
-
-    fn doHandshake(self: *WebSocketClient, io: std.Io, host: []const u8, port: u16, path: []const u8) !void {
-        // Generate random key for Sec-WebSocket-Key
-        var key_bytes: [16]u8 = undefined;
-        io.random(&key_bytes);
-        var key_buf: [24]u8 = undefined;
-        const key = std.base64.standard.Encoder.encode(&key_buf, &key_bytes);
-
-        // Build HTTP upgrade request
-        var req_buf: [2048]u8 = undefined;
-        const req = std.fmt.bufPrint(&req_buf, "GET {s} HTTP/1.1\r\n" ++
-            "Host: {s}:{d}\r\n" ++
+        var request_buffer: [1024]u8 = undefined;
+        const request = try std.fmt.bufPrint(&request_buffer,
+            "GET / HTTP/1.1\r\n" ++
+            "Host: 127.0.0.1:9222\r\n" ++
             "Upgrade: websocket\r\n" ++
             "Connection: Upgrade\r\n" ++
             "Sec-WebSocket-Key: {s}\r\n" ++
-            "Sec-WebSocket-Version: 13\r\n" ++
-            "\r\n", .{ path, host, port, key }) catch return Error.HandshakeFailed;
+            "Sec-WebSocket-Version: 13\r\n\r\n",
+            .{key},
+        );
+        try self.writeAll(request);
 
-        // Send upgrade request via raw write
-        self.writeAll(req) catch return Error.WriteFailed;
+        var response_buffer: [4096]u8 = undefined;
+        var used: usize = 0;
+        while (used < response_buffer.len) {
+            const count = try self.readSome(response_buffer[used..]);
+            if (count == 0) return Error.HandshakeFailed;
+            used += count;
+            if (std.mem.indexOf(u8, response_buffer[0..used], "\r\n\r\n") != null) break;
+        }
+        const response = response_buffer[0..used];
+        if (!std.mem.startsWith(u8, response, "HTTP/1.1 101")) return Error.HandshakeFailed;
 
-        // Read response - look for "101 Switching Protocols"
-        var received: usize = 0;
-        while (received < self.read_buf.len) {
-            const n = self.rawRead(self.read_buf[received..]) catch return Error.ReadFailed;
-            if (n == 0) return Error.HandshakeFailed;
-            received += n;
-            if (std.mem.indexOf(u8, self.read_buf[0..received], "\r\n\r\n") != null) break;
-        }
-        const response = self.read_buf[0..received];
-        if (!std.mem.startsWith(u8, response, "HTTP/1.1 101")) {
-            return Error.HandshakeFailed;
-        }
-
-        // Verify Upgrade header is present (case-insensitive check)
-        if (std.mem.indexOf(u8, response, "websocket") == null and
-            std.mem.indexOf(u8, response, "WebSocket") == null and
-            std.mem.indexOf(u8, response, "Websocket") == null)
-        {
-            return Error.HandshakeFailed;
-        }
+        var accept_input: [key.len + websocket_guid.len]u8 = undefined;
+        @memcpy(accept_input[0..key.len], key);
+        @memcpy(accept_input[key.len..], websocket_guid);
+        var digest: [20]u8 = undefined;
+        std.crypto.hash.Sha1.hash(&accept_input, &digest, .{});
+        var expected_buffer: [28]u8 = undefined;
+        const expected = std.base64.standard.Encoder.encode(&expected_buffer, &digest);
+        const expected_header = try std.fmt.allocPrint(self.allocator, "Sec-WebSocket-Accept: {s}", .{expected});
+        defer self.allocator.free(expected_header);
+        if (!containsIgnoreCase(response, expected_header)) return Error.HandshakeFailed;
     }
 
-    fn writeAll(self: *WebSocketClient, data: []const u8) !void {
-        var sent: usize = 0;
-        while (sent < data.len) {
-            const n = c_write(self.fd, data.ptr + sent, data.len - sent);
-            if (n <= 0) return Error.WriteFailed;
-            sent += @intCast(n);
-        }
-    }
+    fn sendFrame(self: *WebSocketClient, opcode: u8, payload: []const u8) !void {
+        var header: [14]u8 = undefined;
+        var header_len: usize = 0;
+        header[header_len] = 0x80 | (opcode & 0x0f);
+        header_len += 1;
 
-    fn rawRead(self: *WebSocketClient, buf: []u8) !usize {
-        if (@import("builtin").os.tag == .windows) return Error.ReadFailed;
-        const n = c_read(self.fd, buf.ptr, buf.len);
-        if (n < 0) return Error.ReadFailed;
-        return @intCast(n);
-    }
-
-    fn writeFrame(self: *WebSocketClient, opcode: u8, data: []const u8) !void {
-        var frame_buf: [14]u8 = undefined; // max header size
-        var header_len: usize = 2;
-
-        // Byte 0: FIN + opcode
-        frame_buf[0] = 0x80 | opcode; // FIN=1
-
-        // Byte 1: MASK=1 + payload length
-        if (data.len <= 125) {
-            frame_buf[1] = 0x80 | @as(u8, @intCast(data.len));
-        } else if (data.len <= 65535) {
-            frame_buf[1] = 0x80 | 126;
-            frame_buf[2] = @intCast(data.len >> 8);
-            frame_buf[3] = @intCast(data.len & 0xFF);
-            header_len = 4;
+        if (payload.len <= 125) {
+            header[header_len] = 0x80 | @as(u8, @intCast(payload.len));
+            header_len += 1;
+        } else if (payload.len <= 0xffff) {
+            header[header_len] = 0x80 | 126;
+            header_len += 1;
+            header[header_len] = @intCast((payload.len >> 8) & 0xff);
+            header[header_len + 1] = @intCast(payload.len & 0xff);
+            header_len += 2;
         } else {
-            frame_buf[1] = 0x80 | 127;
-            const len64: u64 = data.len;
-            inline for (0..8) |i| {
-                frame_buf[2 + i] = @intCast((len64 >> @intCast(56 - i * 8)) & 0xFF);
+            header[header_len] = 0x80 | 127;
+            header_len += 1;
+            const length: u64 = @intCast(payload.len);
+            for (0..8) |index| {
+                header[header_len + index] = @intCast((length >> @intCast(56 - index * 8)) & 0xff);
             }
-            header_len = 10;
+            header_len += 8;
         }
 
-        // Generate masking key
-        var mask_key: [4]u8 = undefined;
-        self.io.random(&mask_key);
-        @memcpy(frame_buf[header_len .. header_len + 4], &mask_key);
+        var mask: [4]u8 = undefined;
+        self.io.random(&mask);
+        @memcpy(header[header_len .. header_len + 4], &mask);
         header_len += 4;
+        try self.writeAll(header[0..header_len]);
 
-        // Send header
-        self.writeAll(frame_buf[0..header_len]) catch return Error.WriteFailed;
-
-        // Send masked payload in chunks to avoid allocating
-        var chunk: [4096]u8 = undefined;
         var offset: usize = 0;
-        while (offset < data.len) {
-            const remaining = data.len - offset;
-            const chunk_size = @min(remaining, chunk.len);
-            @memcpy(chunk[0..chunk_size], data[offset .. offset + chunk_size]);
-            // Apply mask
-            for (0..chunk_size) |i| {
-                chunk[i] ^= mask_key[(offset + i) % 4];
-            }
-            self.writeAll(chunk[0..chunk_size]) catch return Error.WriteFailed;
-            offset += chunk_size;
+        var chunk: [4096]u8 = undefined;
+        while (offset < payload.len) {
+            const count = @min(chunk.len, payload.len - offset);
+            for (0..count) |index| chunk[index] = payload[offset + index] ^ mask[(offset + index) % 4];
+            try self.writeAll(chunk[0..count]);
+            offset += count;
         }
-    }
-
-    fn readFrame(self: *WebSocketClient) ![]u8 {
-        // Read frame header (2 bytes minimum)
-        var header: [2]u8 = undefined;
-        self.readExact(&header) catch return Error.ReadFailed;
-
-        const opcode = header[0] & 0x0F;
-        const masked = (header[1] & 0x80) != 0;
-        var payload_len: u64 = header[1] & 0x7F;
-
-        if (payload_len == 126) {
-            var ext: [2]u8 = undefined;
-            self.readExact(&ext) catch return Error.ReadFailed;
-            payload_len = @as(u64, ext[0]) << 8 | ext[1];
-        } else if (payload_len == 127) {
-            var ext: [8]u8 = undefined;
-            self.readExact(&ext) catch return Error.ReadFailed;
-            payload_len = 0;
-            inline for (0..8) |i| {
-                payload_len |= @as(u64, ext[i]) << @intCast(56 - i * 8);
-            }
-        }
-
-        // Handle close frame
-        if (opcode == 0x8) {
-            self.connected = false;
-            return Error.ConnectionClosed;
-        }
-
-        // Handle ping - send pong
-        if (opcode == 0x9) {
-            if (payload_len > std.math.maxInt(usize) or payload_len > self.read_buf.len) return self.readFrame();
-            const len: usize = @intCast(payload_len);
-            self.readExact(self.read_buf[0..len]) catch return Error.ReadFailed;
-            self.writeFrame(0xA, self.read_buf[0..len]) catch {};
-            return self.readFrame(); // recurse for next real message
-        }
-
-        // Skip pong
-        if (opcode == 0xA) {
-            if (payload_len > 0 and payload_len <= std.math.maxInt(usize) and payload_len <= self.read_buf.len) {
-                const len: usize = @intCast(payload_len);
-                self.readExact(self.read_buf[0..len]) catch return Error.ReadFailed;
-            }
-            return self.readFrame();
-        }
-
-        if (payload_len > std.math.maxInt(usize) or payload_len > self.read_buf.len) return Error.MessageTooLarge;
-        const len: usize = @intCast(payload_len);
-
-        // Read mask key if present (server shouldn't mask, but handle it)
-        var mask_key: [4]u8 = undefined;
-        if (masked) {
-            self.readExact(&mask_key) catch return Error.ReadFailed;
-        }
-
-        // Read payload
-        self.readExact(self.read_buf[0..len]) catch return Error.ReadFailed;
-
-        // Unmask if needed
-        if (masked) {
-            for (0..len) |i| {
-                self.read_buf[i] ^= mask_key[i % 4];
-            }
-        }
-
-        return self.read_buf[0..len];
     }
 
     fn readFrameAlloc(self: *WebSocketClient, allocator: std.mem.Allocator, max_size: usize) ![]u8 {
-        // Read frame header
         var header: [2]u8 = undefined;
-        self.readExact(&header) catch return Error.ReadFailed;
-
-        const opcode = header[0] & 0x0F;
+        try self.readExact(&header);
+        const final = (header[0] & 0x80) != 0;
+        const opcode = header[0] & 0x0f;
         const masked = (header[1] & 0x80) != 0;
-        var payload_len: u64 = header[1] & 0x7F;
+        var payload_len: u64 = header[1] & 0x7f;
 
         if (payload_len == 126) {
-            var ext: [2]u8 = undefined;
-            self.readExact(&ext) catch return Error.ReadFailed;
-            payload_len = @as(u64, ext[0]) << 8 | ext[1];
+            var extended: [2]u8 = undefined;
+            try self.readExact(&extended);
+            payload_len = (@as(u64, extended[0]) << 8) | extended[1];
         } else if (payload_len == 127) {
-            var ext: [8]u8 = undefined;
-            self.readExact(&ext) catch return Error.ReadFailed;
+            var extended: [8]u8 = undefined;
+            try self.readExact(&extended);
             payload_len = 0;
-            inline for (0..8) |i| {
-                payload_len |= @as(u64, ext[i]) << @intCast(56 - i * 8);
-            }
+            for (extended) |byte| payload_len = (payload_len << 8) | byte;
         }
 
         if (opcode == 0x8) {
             self.connected = false;
             return Error.ConnectionClosed;
         }
-        if (opcode == 0x9 or opcode == 0xA) {
-            // Skip ping/pong payload
-            if (payload_len > 0 and payload_len <= std.math.maxInt(usize) and payload_len <= self.read_buf.len) {
-                const len: usize = @intCast(payload_len);
-                self.readExact(self.read_buf[0..len]) catch return Error.ReadFailed;
-                if (opcode == 0x9) self.writeFrame(0xA, self.read_buf[0..len]) catch {};
-            }
+        if (opcode == 0x9) {
+            if (payload_len > max_size or payload_len > std.math.maxInt(usize)) return Error.MessageTooLarge;
+            const ping = try allocator.alloc(u8, @intCast(payload_len));
+            defer allocator.free(ping);
+            try self.readExact(ping);
+            try self.sendFrame(0xA, ping);
             return self.readFrameAlloc(allocator, max_size);
         }
-
-        if (payload_len > max_size) return Error.MessageTooLarge;
-        if (payload_len > std.math.maxInt(usize)) return Error.MessageTooLarge;
-        const len: usize = @intCast(payload_len);
-
-        var mask_key: [4]u8 = undefined;
-        if (masked) {
-            self.readExact(&mask_key) catch return Error.ReadFailed;
+        if (opcode == 0xA) {
+            if (payload_len > std.math.maxInt(usize)) return Error.MessageTooLarge;
+            const pong = try allocator.alloc(u8, @intCast(payload_len));
+            defer allocator.free(pong);
+            try self.readExact(pong);
+            return self.readFrameAlloc(allocator, max_size);
         }
+        if (!final or opcode != 0x1) return Error.InvalidFrame;
+        if (payload_len > max_size or payload_len > std.math.maxInt(usize)) return Error.MessageTooLarge;
 
-        const buf = try allocator.alloc(u8, len);
-        errdefer allocator.free(buf);
-
-        self.readExact(buf) catch return Error.ReadFailed;
-
+        var mask: [4]u8 = undefined;
+        if (masked) try self.readExact(&mask);
+        const payload = try allocator.alloc(u8, @intCast(payload_len));
+        errdefer allocator.free(payload);
+        try self.readExact(payload);
         if (masked) {
-            for (0..len) |i| {
-                buf[i] ^= mask_key[i % 4];
-            }
+            for (payload, 0..) |*byte, index| byte.* ^= mask[index % 4];
         }
-
-        return buf;
+        return payload;
     }
 
-    fn readExact(self: *WebSocketClient, buf: []u8) !void {
-        var total: usize = 0;
-        while (total < buf.len) {
-            const n = self.rawRead(buf[total..]) catch return Error.ReadFailed;
-            if (n == 0) return Error.ConnectionClosed;
-            total += n;
+    fn writeAll(self: *WebSocketClient, bytes: []const u8) !void {
+        var written: usize = 0;
+        while (written < bytes.len) {
+            const count = c_write(self.fd, bytes.ptr + written, bytes.len - written);
+            if (count <= 0) return Error.WriteFailed;
+            written += @intCast(count);
+        }
+    }
+
+    fn readSome(self: *WebSocketClient, bytes: []u8) !usize {
+        const count = c_read(self.fd, bytes.ptr, bytes.len);
+        if (count < 0) return Error.ReadFailed;
+        return @intCast(count);
+    }
+
+    fn readExact(self: *WebSocketClient, bytes: []u8) !void {
+        var received: usize = 0;
+        while (received < bytes.len) {
+            const count = try self.readSome(bytes[received..]);
+            if (count == 0) return Error.ConnectionClosed;
+            received += count;
         }
     }
 };
 
-test "parseWsUrl basic" {
-    const parsed = try WebSocketClient.parseWsUrl("ws://localhost:9222/devtools/page/ABC123");
-    try std.testing.expectEqualStrings("localhost", parsed.host);
-    try std.testing.expectEqual(@as(u16, 9222), parsed.port);
-    try std.testing.expectEqualStrings("/devtools/page/ABC123", parsed.path);
+fn containsIgnoreCase(haystack: []const u8, needle: []const u8) bool {
+    if (needle.len > haystack.len) return false;
+    for (0..haystack.len - needle.len + 1) |start| {
+        if (std.ascii.eqlIgnoreCase(haystack[start .. start + needle.len], needle)) return true;
+    }
+    return false;
 }
 
-test "parseWsUrl default port" {
-    const parsed = try WebSocketClient.parseWsUrl("ws://localhost/path");
-    try std.testing.expectEqualStrings("localhost", parsed.host);
-    try std.testing.expectEqual(@as(u16, 80), parsed.port);
-    try std.testing.expectEqualStrings("/path", parsed.path);
-}
-
-test "parseWsUrl invalid scheme" {
-    const result = WebSocketClient.parseWsUrl("http://localhost:9222");
-    try std.testing.expectError(error.InvalidCharacter, result);
-}
-
-test "parseWsUrl valid URL" {
-    const parsed = try WebSocketClient.parseWsUrl("ws://127.0.0.1:9222/devtools/browser/abc");
-    try std.testing.expectEqualStrings("127.0.0.1", parsed.host);
-    try std.testing.expectEqual(@as(u16, 9222), parsed.port);
-    try std.testing.expectEqualStrings("/devtools/browser/abc", parsed.path);
-}
-
-test "parseWsUrl rejects non-ws scheme" {
-    try std.testing.expectError(error.InvalidCharacter, WebSocketClient.parseWsUrl("http://localhost:9222/path"));
-}
-
-test "parseWsUrl rejects secure websocket scheme" {
-    try std.testing.expectError(error.UnsupportedWsScheme, WebSocketClient.parseWsUrl("wss://localhost:9222/path"));
-}
-
-test "parseWsUrl rejects remote host" {
-    try std.testing.expectError(error.UnsupportedWsHost, WebSocketClient.parseWsUrl("ws://example.com:9222/path"));
-}
-
-test "parseWsUrl rejects ipv6 host" {
-    try std.testing.expectError(error.UnsupportedWsHost, WebSocketClient.parseWsUrl("ws://[::1]:9222/path"));
-}
-
-test "parseIp4 stores bytes in network order" {
-    const ip = WebSocketClient.parseIp4("127.0.0.1") orelse return error.TestUnexpectedResult;
-    try std.testing.expectEqualSlices(u8, &.{ 127, 0, 0, 1 }, std.mem.asBytes(&ip));
+test "websocket accept hash matches the RFC 6455 example" {
+    const input = "dGhlIHNhbXBsZSBub25jZQ==" ++ websocket_guid;
+    var digest: [20]u8 = undefined;
+    std.crypto.hash.Sha1.hash(input, &digest, .{});
+    var output: [28]u8 = undefined;
+    const encoded = std.base64.standard.Encoder.encode(&output, &digest);
+    try std.testing.expectEqualStrings("s3pPLMBiTxaQ9kYGzzhZRbK+xOo=", encoded);
 }
