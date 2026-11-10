@@ -47,7 +47,7 @@ pub fn main(init: std.process.Init) !void {
 
     if (selected_projection == .tui) {
         const suite = dashboard.buildSuite(
-            parsed_spec.steps,
+            &parsed_spec.steps,
             dashboard.profileProbes(selected_profile),
             build_options.spec,
             build_options.profile,
