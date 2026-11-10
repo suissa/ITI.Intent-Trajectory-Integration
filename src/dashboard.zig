@@ -1065,5 +1065,5 @@ fn drawVLine(sub: *tui.screen.SubScreen, x: u16, y: u16, len: u16, char: u21) vo
 fn monotonicNowNs() i128 {
     var ts: std.posix.timespec = undefined;
     _ = std.posix.system.clock_gettime(.MONOTONIC, &ts);
-    return @as(i128, ts.sec) * 1_000_000_000 + ts.nsec;
+    return @as(i128, ts.sec) * 1_000_000_000 + @as(i128, ts.nsec);
 }
