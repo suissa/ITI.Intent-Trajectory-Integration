@@ -1,6 +1,7 @@
 const dsl = @import("dsl.zig");
 const profile_mod = @import("profile.zig");
 const trajectory = @import("trajectory.zig");
+const browser_mod = @import("browser.zig");
 
 pub fn runParsed(
     comptime spec: anytype,
@@ -9,6 +10,7 @@ pub fn runParsed(
     comptime profile_name: []const u8,
     sink: ?trajectory.EventSink,
     semantic_context: trajectory.SemanticContext,
+    browser: ?*browser_mod.Browser,
 ) void {
     var out = trajectory.Console{
         .projection = projection,
@@ -16,6 +18,7 @@ pub fn runParsed(
         .semantic_context = semantic_context,
     };
     const trajectory_name = "iti.intent-trajectory";
+    var run_failed = false;
 
     out.emit(.{
         .kind = .run_started,
@@ -31,6 +34,18 @@ pub fn runParsed(
     inline for (spec.steps, 0..) |step, index| {
         const track_index = index + 1;
         const track = trackName(step.kind);
+        var step_failed = false;
+        var duration_ms: u64 = 0;
+        if (browser) |runtime| {
+            if (isBrowserStep(step.kind)) {
+                duration_ms = runtime.execute(step) catch |err| blk: {
+                    step_failed = true;
+                    run_failed = true;
+                    std.debug.print("ITI browser step failed: {s}: {s}\\n", .{ step.raw, @errorName(err) });
+                    break :blk 0;
+                };
+            }
+        }
         out.emit(.{
             .kind = .track_started,
             .trajectory = trajectory_name,
@@ -41,7 +56,7 @@ pub fn runParsed(
 
         if (step.kind == .hope or step.kind == .hope_see) {
             out.emit(.{
-                .kind = .assertion_passed,
+                .kind = if (step_failed) .assertion_failed else .assertion_passed,
                 .trajectory = trajectory_name,
                 .track = track,
                 .name = step.object,
@@ -50,7 +65,7 @@ pub fn runParsed(
             });
         } else {
             out.emit(.{
-                .kind = .expansion,
+                .kind = if (step_failed) .assertion_failed else .expansion,
                 .trajectory = trajectory_name,
                 .track = track,
                 .name = step.raw,
@@ -63,9 +78,21 @@ pub fn runParsed(
             .kind = .track_finished,
             .trajectory = trajectory_name,
             .track = track,
-            .status = .passed,
+            .status = if (step_failed) .failed else .passed,
             .track_index = track_index,
         });
+        if (browser != null and isBrowserStep(step.kind)) {
+            var timing_buffer: [64]u8 = undefined;
+            const timing = std.fmt.bufPrint(&timing_buffer, "duration_ms={d}", .{duration_ms}) catch "duration_ms=0";
+            out.emit(.{
+                .kind = .benchmark_sample,
+                .trajectory = trajectory_name,
+                .track = track,
+                .name = timing,
+                .status = .observed,
+                .track_index = track_index,
+            });
+        }
     }
 
     emitSelectedProbes(&out, profile, trajectory_name);
@@ -73,13 +100,20 @@ pub fn runParsed(
     out.emit(.{
         .kind = .trajectory_finished,
         .trajectory = trajectory_name,
-        .status = .passed,
+        .status = if (run_failed) .failed else .passed,
     });
     out.emit(.{
         .kind = .run_finished,
         .trajectory = trajectory_name,
-        .status = .passed,
+        .status = if (run_failed) .failed else .passed,
     });
+}
+
+fn isBrowserStep(kind: dsl.StepKind) bool {
+    return switch (kind) {
+        .open, .type_into, .click, .hope_see => true,
+        else => false,
+    };
 }
 
 fn trackName(kind: dsl.StepKind) []const u8 {
