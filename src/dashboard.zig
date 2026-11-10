@@ -253,6 +253,7 @@ pub const Dashboard = struct {
         if (self.state == .stopped or self.state == .finished) {
             self.emitted_events = 0;
             self.elapsed_ms = 0;
+            self.run_failed = false;
         }
         self.state = .running;
         self.last_tick_ns = monotonicNowNs();
