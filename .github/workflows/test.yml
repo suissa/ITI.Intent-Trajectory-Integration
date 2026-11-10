@@ -57,6 +57,13 @@ jobs:
           grep -q '"kind":"benchmark_sample"' /tmp/iti-smoke.log
           grep -q '"kind":"assertion_passed"' /tmp/iti-smoke.log
 
+      - name: Verify configured DataPlane probe fan-out
+        run: |
+          set -o pipefail
+          zig build run -Dspec=examples/login.iti -Dprofile=data -Dui=ndjson -Ddata-plane=configs/data-plane.example.iti 2>&1 | tee /tmp/iti-data-plane.log
+          test "$(grep -c '"kind":"data_probe"' /tmp/iti-data-plane.log)" -eq 7
+          test "$(grep -c '"kind":"benchmark_sample"' /tmp/iti-data-plane.log)" -eq 7
+
       - name: Lightpanda diagnostics
         if: always()
         run: |
