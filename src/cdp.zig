@@ -26,7 +26,7 @@ pub const Client = struct {
         };
 
         var empty_params = std.json.Value{ .object = try std.json.ObjectMap.init(allocator, &.{}, &.{}) };
-        defer empty_params.object.deinit();
+        defer empty_params.object.deinit(allocator);
         const version = client.command("Browser.getVersion", empty_params, null) catch |err| {
             std.debug.print("ITI CDP Browser.getVersion: {s}\\n", .{@errorName(err)});
             return err;
@@ -234,7 +234,7 @@ pub const Client = struct {
 
 test "empty CDP params serialize as a JSON object" {
     var object = try std.json.ObjectMap.init(std.testing.allocator, &.{}, &.{});
-    defer object.deinit();
+    defer object.deinit(std.testing.allocator);
     const params = std.json.Value{ .object = object };
     const json = try std.json.Stringify.valueAlloc(std.testing.allocator, params, .{});
     defer std.testing.allocator.free(json);
