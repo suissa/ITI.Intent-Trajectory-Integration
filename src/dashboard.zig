@@ -1056,6 +1056,7 @@ pub fn run(
             next_frame = now;
         }
     }
+    if (dash.run_failed) return error.BrowserExecutionFailed;
 }
 
 // ============================================
