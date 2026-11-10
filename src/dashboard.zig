@@ -975,7 +975,7 @@ pub fn run(
     semantic_context: trajectory.SemanticContext,
     allocator: std.mem.Allocator,
     io: std.Io,
-    browser: ?*browser_mod.Browser = null,
+    browser: ?*browser_mod.Browser,
 ) !void {
 
     var term = try tui.terminal.Terminal.init(.{});
@@ -1075,7 +1075,7 @@ pub fn main(init: std.process.Init) !void {
     };
     const suite = buildSuite(&parsed_spec.steps, &profileProbes(selected_profile), build_options.spec, build_options.profile);
 
-    try run(suite, .tui, null, .{}, init.gpa, init.io);
+    try run(suite, .tui, null, .{}, init.gpa, init.io, null);
 }
 
 // ============================================
