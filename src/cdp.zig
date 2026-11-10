@@ -65,7 +65,8 @@ pub const Client = struct {
         defer result.deinit();
         if (result.value.object.get("error") != null) return error.NavigationFailed;
         for (0..40) |_| {
-            if (try self.evaluateBool("document.readyState !== 'loading'")) return;
+            const ready = self.evaluateBool("document.readyState !== 'loading'") catch false;
+            if (ready) return;
             std.Thread.sleep(25_000_000);
         }
         return error.NavigationTimeout;
