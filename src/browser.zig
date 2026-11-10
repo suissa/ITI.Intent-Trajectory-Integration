@@ -24,7 +24,7 @@ pub const Browser = struct {
 
         try startLightpanda(allocator, io);
         var last_error: anyerror = error.LightpandaNotReady;
-        for (0..100) |attempt| {
+        for (0..100) |_| {
             try io.sleep(.fromMilliseconds(100), .awake);
             if (cdp.Client.connect(allocator, io)) |client| {
                 return .{ .allocator = allocator, .io = io, .environ = environ, .client = client };
