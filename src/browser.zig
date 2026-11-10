@@ -15,15 +15,24 @@ pub const Browser = struct {
     ) !Browser {
         if (cdp.Client.connect(allocator, io)) |client| {
             return .{ .allocator = allocator, .io = io, .environ = environ, .client = client };
-        } else |_| {}
+        } else |err| {
+            std.debug.print("ITI CDP initial connection: {s}\\n", .{@errorName(err)});
+        }
 
         try startLightpanda(allocator, io);
-        for (0..50) |_| {
+        var last_error: anyerror = error.LightpandaNotReady;
+        for (0..100) |attempt| {
             try io.sleep(.fromMilliseconds(100), .awake);
             if (cdp.Client.connect(allocator, io)) |client| {
                 return .{ .allocator = allocator, .io = io, .environ = environ, .client = client };
-            } else |_| {}
+            } else |err| {
+                last_error = err;
+                if (attempt == 0 or attempt == 25 or attempt == 50 or attempt == 75) {
+                    std.debug.print("ITI CDP retry {d}: {s}\\n", .{ attempt + 1, @errorName(err) });
+                }
+            }
         }
+        std.debug.print("ITI Lightpanda did not become ready: {s}\\n", .{@errorName(last_error)});
         return error.LightpandaNotReady;
     }
 
