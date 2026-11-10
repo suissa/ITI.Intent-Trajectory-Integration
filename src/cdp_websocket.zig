@@ -33,6 +33,19 @@ pub const WebSocketClient = struct {
         InvalidFrame,
     };
 
+    pub fn isListening() bool {
+        const fd = c_socket(2, 1, 0);
+        if (fd < 0) return false;
+        defer _ = c_close(fd);
+        const address = SockAddrIn{
+            .family = 2,
+            .port = std.mem.nativeToBig(u16, 9222),
+            .address = std.mem.nativeToBig(u32, 0x7f000001),
+            .zero = @splat(0),
+        };
+        return c_connect(fd, @ptrCast(&address), @sizeOf(SockAddrIn)) == 0;
+    }
+
     /// Open the local Lightpanda CDP endpoint. The transport deliberately refuses non-loopback hosts.
     pub fn connect(allocator: std.mem.Allocator, io: std.Io) !WebSocketClient {
         if (@import("builtin").os.tag == .windows) return Error.ConnectionFailed;
@@ -148,6 +161,9 @@ pub const WebSocketClient = struct {
         self.io.random(&mask);
         @memcpy(header[header_len .. header_len + 4], &mask);
         header_len += 4;
+        if (std.mem.indexOf(u8, payload, "Browser.getVersion") != null or opcode == 0xA) {
+            std.debug.print("ITI WS tx opcode={d} header={any} payload={s}\\n", .{ opcode, header[0..header_len], payload });
+        }
         try self.writeAll(header[0..header_len]);
 
         var offset: usize = 0;
@@ -197,6 +213,9 @@ pub const WebSocketClient = struct {
                 0;
             std.debug.print("ITI WebSocket peer close: code={d}, payload={s}\\n", .{ close_code, if (close_len > 2) close_payload[2..close_len] else "" });
             return Error.PeerSentClose;
+        }
+        if (opcode != 0x8) {
+            std.debug.print("ITI WS rx opcode={d} fin={any} masked={any} payload_len={d}\\n", .{ opcode, final, masked, payload_len });
         }
         if (opcode == 0x9) {
             if (payload_len > max_size or payload_len > std.math.maxInt(usize)) return Error.MessageTooLarge;
