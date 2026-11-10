@@ -28,3 +28,25 @@ An adapter declares:
 ## Follow-up
 
 Configuration parsing, driver factories, environment-variable resolution, and wiring results into `data_probe` / `benchmark_sample` events are tracked in [issue #16](https://github.com/suissa/ITI.Intent-Trajectory-Integration/issues/16).
+
+## Project configuration
+
+The default config path is `configs/data-plane.iti` (empty by default, preserving existing behavior). Select another file with `-Ddata-plane=path/to/file.iti`.
+
+```text
+adapter primary memory
+capabilities read write cache search vector graph events
+```
+
+Optional fields resolve values from the process environment map:
+
+```text
+adapter remote-store custom-http
+capabilities read write search
+endpoint-env ITI_DATA_ENDPOINT
+credential-env ITI_DATA_TOKEN
+```
+
+A driver name must be registered through `Runtime.registerFactory` before the config is loaded. The built-in `memory` driver is a deterministic fixture. Endpoint and credential values are passed only to the selected factory; they are not added to adapter IDs, probe details, or Trajectory events.
+
+Runner/TUI execution of configured probes is tracked separately in [issue #18](https://github.com/suissa/ITI.Intent-Trajectory-Integration/issues/18).
