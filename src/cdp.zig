@@ -5,22 +5,18 @@ pub const Client = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
     ws: WebSocketClient,
-    read_buffer: []u8,
     next_id: usize = 0,
     target_id: []const u8,
     session_id: []const u8,
 
     pub fn connect(allocator: std.mem.Allocator, io: std.Io) !Client {
-        const read_buffer = try allocator.alloc(u8, 64 * 1024);
-        errdefer allocator.free(read_buffer);
-        var ws = try WebSocketClient.connect(allocator, io, "ws://127.0.0.1:9222/", read_buffer);
-        errdefer ws.close();
+        var ws = try WebSocketClient.connect(allocator, io);
+        errdefer ws.deinit();
 
         var client = Client{
             .allocator = allocator,
             .io = io,
             .ws = ws,
-            .read_buffer = read_buffer,
             .target_id = "",
             .session_id = "",
         };
@@ -55,10 +51,9 @@ pub const Client = struct {
     }
 
     pub fn deinit(self: *Client) void {
-        self.ws.close();
+        self.ws.deinit();
         if (self.target_id.len > 0) self.allocator.free(self.target_id);
         if (self.session_id.len > 0) self.allocator.free(self.session_id);
-        self.allocator.free(self.read_buffer);
     }
 
     pub fn open(self: *Client, url: []const u8) !void {
