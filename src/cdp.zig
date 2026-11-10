@@ -137,7 +137,12 @@ pub const Client = struct {
             \\}})()
         , .{target_json});
         defer self.allocator.free(expression);
-        if (!try self.evaluateBool(expression)) return error.DestinationNotVisible;
+        for (0..40) |_| {
+            const visible = self.evaluateBool(expression) catch false;
+            if (visible) return;
+            std.Thread.sleep(25_000_000);
+        }
+        return error.DestinationNotVisible;
     }
 
     fn evaluateBool(self: *Client, expression: []const u8) !bool {
@@ -190,7 +195,7 @@ pub const Client = struct {
         while (true) {
             const message = try self.ws.receiveMessageAlloc(self.allocator, 1024 * 1024);
             defer self.allocator.free(message);
-            const parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, message, .{});
+            const parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, message, .{ .allocate = .alloc_always });
             const response_id = parsed.value.object.get("id") orelse {
                 parsed.deinit();
                 continue;
