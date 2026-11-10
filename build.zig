@@ -40,7 +40,7 @@ pub fn build(b: *std.Build) void {
     const dash_exe = b.addExecutable(.{
         .name = "iti-dashboard",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/dashboard.zig"),
+            .root_source_file = b.path("main.zig"),
             .target = target,
             .optimize = optimize,
         }),
