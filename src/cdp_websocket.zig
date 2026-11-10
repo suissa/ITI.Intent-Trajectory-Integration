@@ -211,11 +211,8 @@ pub const WebSocketClient = struct {
                 (@as(u16, close_payload[0]) << 8) | close_payload[1]
             else
                 0;
-            std.debug.print("ITI WebSocket peer close: code={d}, payload={s}\\n", .{ close_code, if (close_len > 2) close_payload[2..close_len] else "" });
+            _ = close_code;
             return Error.PeerSentClose;
-        }
-        if (opcode != 0x8) {
-            std.debug.print("ITI WS rx opcode={d} fin={any} masked={any} payload_len={d}\\n", .{ opcode, final, masked, payload_len });
         }
         if (opcode == 0x9) {
             if (payload_len > max_size or payload_len > std.math.maxInt(usize)) return Error.MessageTooLarge;
@@ -265,10 +262,7 @@ pub const WebSocketClient = struct {
         var received: usize = 0;
         while (received < bytes.len) {
             const count = try self.readSome(bytes[received..]);
-            if (count == 0) {
-                std.debug.print("ITI WebSocket socket reached EOF while reading {d} bytes\\n", .{bytes.len});
-                return Error.SocketEof;
-            }
+            if (count == 0) return Error.SocketEof;
             received += count;
         }
     }
