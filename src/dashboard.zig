@@ -125,7 +125,7 @@ pub fn profileProbes(comptime profile: profile_mod.TestSet) [profile_probe_count
 /// Clips a UTF-8 string to at most `cells` terminal columns starting at byte
 /// offset `start`, honoring double-width codepoints. Pure function so it can be
 /// unit tested without a terminal.
-pub fn clipSegment(comptime src: []const u8, start: usize, cells: usize, max_w: usize) struct { text: []const u8, cells: usize } {
+pub fn clipSegment(src: []const u8, start: usize, cells: usize, max_w: usize) struct { text: []const u8, cells: usize } {
     _ = max_w;
     var taken: usize = 0;
     var i: usize = @min(start, src.len);
@@ -863,7 +863,7 @@ fn upper(comptime src: []const u8) []const u8 {
 }
 
 /// Copies `src` into a fixed-size array field, tracking its length.
-fn copyBounded(src: []const u8, buf: []u8, len: *u16) void {
+fn copyBounded(src: []const u8, buf: []u8, len: *u8) void {
     const n = @min(src.len, buf.len);
     @memcpy(buf[0..n], src[0..n]);
     len.* = @intCast(n);
