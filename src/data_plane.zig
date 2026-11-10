@@ -152,7 +152,7 @@ pub const Registry = struct {
         for (self.adapters.items) |adapter| {
             if (!adapter.supports(capability)) continue;
             const started = std.Io.Clock.awake.now(io).nanoseconds;
-            var result = adapter.probe(self.allocator, io, capability, probe_context) catch |err| .{
+            var result: ProbeResult = adapter.probe(self.allocator, io, capability, probe_context) catch |err| ProbeResult{
                 .status = .failed,
                 .detail = @errorName(err),
             };
