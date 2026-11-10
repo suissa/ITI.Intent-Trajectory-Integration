@@ -1242,7 +1242,10 @@ pub fn main(init: std.process.Init) !void {
     };
     const suite = buildSuite(&parsed_spec.steps, &profileProbes(selected_profile), build_options.spec, build_options.profile);
 
-    try run(suite, .tui, null, .{}, init.gpa, init.io, null);
+    var data_plane_runtime = try data_plane.Runtime.init(init.gpa);
+    defer data_plane_runtime.deinit();
+    try data_plane_runtime.load("", init.environ_map, init.io);
+    try run(suite, .tui, null, .{}, init.gpa, init.io, null, &data_plane_runtime);
 }
 
 // ============================================
