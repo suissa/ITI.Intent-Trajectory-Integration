@@ -39,6 +39,15 @@ jobs:
           curl -fsSL https://pkg.lightpanda.io/install.sh | bash -s "1.0.3"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      - name: Start Lightpanda and probe CDP with Node
+        run: |
+          LIGHTPANDA_DISABLE_TELEMETRY=true nohup lightpanda serve --host 127.0.0.1 --port 9222 >/tmp/iti-lightpanda.log 2>&1 </dev/null &
+          for attempt in $(seq 1 50); do
+            if curl -fsS http://127.0.0.1:9222/json/version >/dev/null; then break; fi
+            sleep 0.1
+          done
+          node -e 'const ws = new WebSocket("ws://127.0.0.1:9222/"); const timer = setTimeout(() => { console.error("CDP probe timeout"); process.exit(1); }, 5000); ws.addEventListener("open", () => ws.send(JSON.stringify({ id: 1, method: "Browser.getVersion", params: {} }))); ws.addEventListener("message", event => { console.log(String(event.data)); clearTimeout(timer); ws.close(); process.exit(0); }); ws.addEventListener("error", error => { console.error(error); clearTimeout(timer); process.exit(1); });'
+
       - name: Run real CDP browser smoke test
         env:
           ITI_CUSTOMER_EMAIL: smoke@example.com
