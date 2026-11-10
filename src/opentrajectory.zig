@@ -252,7 +252,7 @@ pub const Exporter = struct {
             .id = id,
             .label = event.name,
             .status = if (event.status == .failed) "failed" else "satisfied",
-            .attributes = self.attributes(event.semantic, index),
+            .attributes = self.attributes(event.semantic, index, event.track),
         };
         const payload = .{
             .track = track.snapshot(self.trajectory_id),
