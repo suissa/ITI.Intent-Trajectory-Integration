@@ -7,8 +7,9 @@ pub fn runParsed(
     comptime profile: profile_mod.TestSet,
     comptime projection: trajectory.Projection,
     comptime profile_name: []const u8,
+    sink: ?trajectory.EventSink,
 ) void {
-    var out = trajectory.Console{ .projection = projection };
+    var out = trajectory.Console{ .projection = projection, .sink = sink };
     const trajectory_name = "iti.intent-trajectory";
 
     out.emit(.{
