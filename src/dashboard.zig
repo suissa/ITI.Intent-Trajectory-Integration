@@ -897,9 +897,10 @@ fn padRight(src: []const u8, buf: []u8) []u8 {
 fn timestampInto(buf: *[8]u8) []const u8 {
     var ts: std.posix.timespec = undefined;
     _ = std.posix.system.clock_gettime(.REALTIME, &ts);
-    const day = std.time.epoch.EpochSeconds{
+    const epoch = std.time.epoch.EpochSeconds{
         .secs = @intCast(ts.sec),
-    }.getDaySeconds();
+    };
+    const day = epoch.getDaySeconds();
     const hh = day.getHoursIntoDay();
     const mm = day.getMinutesIntoHour();
     const ss = day.getSecondsIntoMinute();
