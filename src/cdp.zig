@@ -64,6 +64,11 @@ pub const Client = struct {
         const result = try self.command("Page.navigate", .{ .url = url }, self.session_id);
         defer result.deinit();
         if (result.value.object.get("error") != null) return error.NavigationFailed;
+        for (0..40) |_| {
+            if (try self.evaluateBool("document.readyState !== 'loading'")) return;
+            std.Thread.sleep(25_000_000);
+        }
+        return error.NavigationTimeout;
     }
 
     pub fn typeInto(self: *Client, value: []const u8, target: []const u8) !void {
