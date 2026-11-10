@@ -28,7 +28,7 @@ pub const CapabilitySet = struct {
     }
 
     pub fn count(self: CapabilitySet) usize {
-        return @popCount(self.bits);
+        return @intCast(@popCount(self.bits));
     }
 };
 
