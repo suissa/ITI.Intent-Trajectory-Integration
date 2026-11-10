@@ -316,14 +316,20 @@ pub const DriverFactory = struct {
 
 /// Owns the adapter registry and driver-factory instances for one ITI process.
 pub const Runtime = struct {
-    arena: std.heap.ArenaAllocator,
+    parent_allocator: std.mem.Allocator,
+    arena: *std.heap.ArenaAllocator,
     registry: Registry,
     factories: std.ArrayListUnmanaged(DriverFactory) = .empty,
 
     pub fn init(parent_allocator: std.mem.Allocator) !Runtime {
-        var arena = std.heap.ArenaAllocator.init(parent_allocator);
-        errdefer arena.deinit();
+        const arena = try parent_allocator.create(std.heap.ArenaAllocator);
+        arena.* = std.heap.ArenaAllocator.init(parent_allocator);
+        errdefer {
+            arena.deinit();
+            parent_allocator.destroy(arena);
+        }
         var runtime = Runtime{
+            .parent_allocator = parent_allocator,
             .arena = arena,
             .registry = Registry.init(arena.allocator()),
         };
@@ -336,6 +342,7 @@ pub const Runtime = struct {
         self.registry.deinit();
         self.factories.deinit(allocator);
         self.arena.deinit();
+        self.parent_allocator.destroy(self.arena);
     }
 
     pub fn registerFactory(self: *Runtime, name: []const u8, context: ?*anyopaque, create_fn: FactoryFn) !void {
