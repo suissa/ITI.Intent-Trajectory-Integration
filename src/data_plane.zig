@@ -178,6 +178,7 @@ pub const MemoryAdapter = struct {
     last_correlation_id: []const u8 = "",
     last_actor_type: []const u8 = "",
     last_subject_id: []const u8 = "",
+    fail: bool = false,
 
     pub fn asAdapter(self: *MemoryAdapter, id: []const u8, capabilities: CapabilitySet) Adapter {
         return .{
@@ -203,6 +204,7 @@ pub const MemoryAdapter = struct {
         self.last_correlation_id = probe_context.correlation_id;
         self.last_actor_type = probe_context.actor_type;
         self.last_subject_id = probe_context.subject_id;
+        if (self.fail) return error.ProbeFailed;
         return .{
             .status = .passed,
             .detail = "memory adapter probe passed",
@@ -265,16 +267,20 @@ test "probeAll isolates adapter failures and returns only capable adapters" {
     defer registry.deinit();
 
     var first = MemoryAdapter{};
-    var second = MemoryAdapter{};
+    var second = MemoryAdapter{ .fail = true };
     try registry.register(first.asAdapter("read-store", CapabilitySet.init(&.{.read})));
-    try registry.register(second.asAdapter("write-store", CapabilitySet.init(&.{.write})));
+    try registry.register(second.asAdapter("failing-read-store", CapabilitySet.init(&.{.read})));
+    try registry.register(MemoryAdapter{}.asAdapter("write-store", CapabilitySet.init(&.{.write})));
 
     const outcomes = try registry.probeAll(.read, std.testing.io, .{ .correlation_id = "corr-all" });
     defer std.testing.allocator.free(outcomes);
 
-    try std.testing.expectEqual(@as(usize, 1), outcomes.len);
+    try std.testing.expectEqual(@as(usize, 2), outcomes.len);
     try std.testing.expectEqualStrings("read-store", outcomes[0].adapter_id);
     try std.testing.expectEqual(ProbeStatus.passed, outcomes[0].result.status);
+    try std.testing.expectEqualStrings("failing-read-store", outcomes[1].adapter_id);
+    try std.testing.expectEqual(ProbeStatus.failed, outcomes[1].result.status);
+    try std.testing.expectEqualStrings("ProbeFailed", outcomes[1].result.detail);
     try std.testing.expectEqual(@as(usize, 1), first.calls);
-    try std.testing.expectEqual(@as(usize, 0), second.calls);
+    try std.testing.expectEqual(@as(usize, 1), second.calls);
 }
