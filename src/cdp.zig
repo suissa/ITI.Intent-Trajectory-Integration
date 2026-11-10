@@ -27,7 +27,10 @@ pub const Client = struct {
 
         const created = try client.command("Target.createTarget", .{ .url = "about:blank" }, null);
         defer created.deinit();
-        const target = created.value.object.get("result").?.object.get("targetId").?.string;
+        const created_result = created.value.object.get("result") orelse return error.InvalidCdpResponse;
+        const target_value = created_result.object.get("targetId") orelse return error.InvalidCdpResponse;
+        if (target_value != .string) return error.InvalidCdpResponse;
+        const target = target_value.string;
         client.target_id = try allocator.dupe(u8, target);
         errdefer allocator.free(client.target_id);
 
@@ -36,7 +39,10 @@ pub const Client = struct {
             .flatten = true,
         }, null);
         defer attached.deinit();
-        const session = attached.value.object.get("result").?.object.get("sessionId").?.string;
+        const attached_result = attached.value.object.get("result") orelse return error.InvalidCdpResponse;
+        const session_value = attached_result.object.get("sessionId") orelse return error.InvalidCdpResponse;
+        if (session_value != .string) return error.InvalidCdpResponse;
+        const session = session_value.string;
         client.session_id = try allocator.dupe(u8, session);
 
         const page_enabled = try client.command("Page.enable", .{}, client.session_id);
@@ -134,7 +140,9 @@ pub const Client = struct {
             .awaitPromise = true,
         }, self.session_id);
         defer result.deinit();
-        const value = result.value.object.get("result").?.object.get("result").?.object.get("value") orelse return false;
+        const remote_result = result.value.object.get("result") orelse return false;
+        const remote_value = remote_result.object.get("result") orelse return false;
+        const value = remote_value.object.get("value") orelse return false;
         return switch (value) {
             .bool => |boolean| boolean,
             else => false,
