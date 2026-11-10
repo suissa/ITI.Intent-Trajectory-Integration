@@ -8,8 +8,10 @@ const dashboard = @import("src/dashboard.zig");
 const websocket = @import("src/websocket.zig");
 const opentrajectory = @import("src/opentrajectory.zig");
 const browser_mod = @import("src/browser.zig");
+const data_plane = @import("src/data_plane.zig");
 
 const source = @embedFile(build_options.spec);
+const data_plane_source = @embedFile(build_options.data_plane);
 
 const parsed_spec = blk: {
     @setEvalBranchQuota(100_000);
@@ -49,6 +51,10 @@ fn intentId() []const u8 {
 }
 
 pub fn main(init: std.process.Init) !void {
+    var data_plane_runtime = try data_plane.Runtime.init(init.gpa);
+    defer data_plane_runtime.deinit();
+    try data_plane_runtime.load(data_plane_source, init.environ_map, init.io);
+
     var hub = try websocket.Hub.init(init.io);
     defer hub.deinit();
 

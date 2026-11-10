@@ -1,0 +1,3 @@
+# Deterministic local fixture; production drivers register factories in code.
+adapter local-memory memory
+capabilities read write cache search vector graph events
