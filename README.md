@@ -125,11 +125,44 @@ Implemented:
 - compile-time test profiles.
 - `full` profile covering intent/unit/integration/E2E/data/performance/discovery selection.
 - OpenTrajectory-compatible Trajectory / Track / Expansion event model.
-- append-only NDJSON output suitable for realtime consumers.\n- terminal projection using the same Trajectory event stream.\n- Web Dashboard shell in `web/index.html`, ready to consume the same events over WebSocket.
-- DSL parser tests.
+- append-only NDJSON output suitable for realtime consumers.
+- terminal projection using the same Trajectory event stream.
+- live WebSocket hub and browser dashboard consuming the shared event stream.
+- Lightpanda CDP executor for navigation, typing, clicking, and destination assertions.
+- actor-value resolution through environment variables.
+- per-browser-step benchmark samples.
+- OpenTrajectory.Digital exporter with semantic identity and causal relations.
+- Destination snapshots and exporter regression tests.
+- Zig 0.16 CI plus a real Lightpanda E2E smoke test.
 
-Next runtime adapters are documented in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): real Lightpanda CDP execution, WebSocket server, OpenTrajectory exporter, and concrete data-plane probes.
+The remaining adapter work is focused on concrete data-plane probes and additional browser interaction strategies; see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+
+## Lightpanda CDP E2E runtime
+
+When the selected profile includes E2E (`standard` and `full`), ITI connects to the CDP endpoint at `127.0.0.1:9222`. If no server is listening, it starts `lightpanda serve --host 127.0.0.1 --port 9222` and waits for the WebSocket handshake before executing the browser suite.
+
+Install Lightpanda with the [official installer](https://lightpanda.io/docs/open-source/installation/):
+
+```bash
+curl -fsSL https://pkg.lightpanda.io/install.sh | bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Set `ITI_BASE_URL` to resolve relative `I OPEN` targets. Actor values are supplied through environment variables: `$customer.email` resolves to `ITI_CUSTOMER_EMAIL`, `$customer.password` to `ITI_CUSTOMER_PASSWORD`, and dots/hyphens become underscores. Literal values can be quoted in the DSL.
+
+```bash
+ITI_BASE_URL=http://127.0.0.1:3000 \
+ITI_CUSTOMER_EMAIL=customer@example.com \
+ITI_CUSTOMER_PASSWORD=secret \
+zig build run -Dprofile=standard -Dui=tui
+```
+
+A deterministic local browser smoke test is available:
+
+```bash
+ITI_CUSTOMER_EMAIL=smoke@example.com zig build run -Dspec=examples/e2e-smoke.iti -Dprofile=standard -Dui=ndjson
+```
 
 ## Realtime WebSocket event stream
 

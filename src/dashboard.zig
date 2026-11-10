@@ -20,6 +20,7 @@ const tui = @import("tui");
 const dsl = @import("dsl.zig");
 const profile_mod = @import("profile.zig");
 const trajectory = @import("trajectory.zig");
+const browser_mod = @import("browser.zig");
 
 /// Path to the spec file embedded by `dashboardMain` when no `-Dspec` was given.
 const default_spec = "examples/login.iti";
@@ -205,6 +206,10 @@ pub const Dashboard = struct {
     total_events: usize = 0,
     elapsed_ms: u64 = 0,
     last_tick_ns: i128 = 0,
+    browser: ?*browser_mod.Browser = null,
+    last_step_failed: bool = false,
+    run_failed: bool = false,
+    last_step_duration_ms: u64 = 0,
 
     log_meta: [max_log_lines]LogLine = [_]LogLine{.{}} ** max_log_lines,
     log_count: usize = 0,
@@ -227,7 +232,7 @@ pub const Dashboard = struct {
 
     fn totalEvents(self: *Dashboard) void {
         var total: usize = 0;
-        for (self.suite) |entry| total += entry.steps.len + entry.probes.len + 4;
+        for (self.suite) |entry| total += 4 * entry.steps.len + entry.probes.len + 4;
         self.total_events = total;
     }
 
@@ -248,6 +253,7 @@ pub const Dashboard = struct {
         if (self.state == .stopped or self.state == .finished) {
             self.emitted_events = 0;
             self.elapsed_ms = 0;
+            self.run_failed = false;
         }
         self.state = .running;
         self.last_tick_ns = monotonicNowNs();
@@ -297,11 +303,8 @@ pub const Dashboard = struct {
         const probes = entry.probes;
         const trajectory_name = "iti.intent-trajectory";
 
-        const track_started_count = steps.len;
-        const expansion_assert_count = steps.len;
-        const track_finished_count = steps.len;
         const probes_count = probes.len;
-        const per_test = track_started_count + expansion_assert_count + track_finished_count + probes_count + 4;
+        const per_test = 4 * steps.len + probes_count + 4;
 
         var test_index: usize = 0;
         var base: usize = 0;
@@ -312,8 +315,10 @@ pub const Dashboard = struct {
         if (base + per_test <= self.emitted_events) return false;
 
         const i = self.emitted_events - base;
-        const step_index = if (i < 3 * steps.len) (i / 3) else null;
-        const phase = if (i < 3 * steps.len) (i % 3) else 0;
+        const step_events = 4 * steps.len;
+        const relative_step_event = if (i >= 2) i - 2 else 0;
+        const step_index = if (i >= 2 and relative_step_event < step_events) (relative_step_event / 4) else null;
+        const phase = if (i >= 2 and relative_step_event < step_events) (relative_step_event % 4) else 0;
 
         if (i == 0) {
             self.log(.info, "RUN", "run_started", entry.name, tui.Color.hex(0xBD93F9));
@@ -330,14 +335,36 @@ pub const Dashboard = struct {
                     out.emit(.{ .kind = .track_started, .trajectory = trajectory_name, .track = track, .name = step.raw, .track_index = si + 1 });
                 },
                 1 => {
+                    self.last_step_failed = false;
+                    self.last_step_duration_ms = 0;
+                    if (self.browser) |runtime| {
+                        if (isBrowserStep(step.kind)) {
+                            self.last_step_duration_ms = runtime.execute(step) catch |err| duration: {
+                                self.last_step_failed = true;
+                                self.run_failed = true;
+                                self.log(.warn, "ERR", "browser_step_failed", @errorName(err), tui.Color.hex(0xFF5555));
+                                break :duration 0;
+                            };
+                        }
+                    }
                     if (step.kind == .hope or step.kind == .hope_see) {
-                        self.log(.success, "OK", "assertion_passed", step.object, tui.Color.hex(0x50FA7B));
+                        const failed = self.last_step_failed;
+                        self.log(if (failed) .warn else .success, if (failed) "ERR" else "OK", if (failed) "assertion_failed" else "assertion_passed", step.object, tui.Color.hex(if (failed) 0xFF5555 else 0x50FA7B));
                         out.emit(.{
-                            .kind = .assertion_passed,
+                            .kind = if (failed) .assertion_failed else .assertion_passed,
                             .trajectory = trajectory_name,
                             .track = track,
                             .name = step.object,
-                            .status = .passed,
+                            .status = if (failed) .failed else .passed,
+                            .track_index = si + 1,
+                        });
+                    } else if (self.last_step_failed) {
+                        out.emit(.{
+                            .kind = .assertion_failed,
+                            .trajectory = trajectory_name,
+                            .track = track,
+                            .name = step.raw,
+                            .status = .failed,
                             .track_index = si + 1,
                         });
                     } else {
@@ -352,19 +379,32 @@ pub const Dashboard = struct {
                         });
                     }
                 },
+                2 => {
+                    var timing_buffer: [64]u8 = undefined;
+                    const timing = std.fmt.bufPrint(&timing_buffer, "duration_ms={d}", .{self.last_step_duration_ms}) catch "duration_ms=0";
+                    out.emit(.{
+                        .kind = .benchmark_sample,
+                        .trajectory = trajectory_name,
+                        .track = track,
+                        .name = timing,
+                        .status = .observed,
+                        .track_index = si + 1,
+                    });
+                },
                 else => {
-                    self.log(.success, "END", "track_finished", track, tui.Color.hex(0x50FA7B));
+                    const failed = self.last_step_failed;
+                    self.log(if (failed) .warn else .success, if (failed) "ERR" else "END", "track_finished", track, tui.Color.hex(if (failed) 0xFF5555 else 0x50FA7B));
                     out.emit(.{
                         .kind = .track_finished,
                         .trajectory = trajectory_name,
                         .track = track,
-                        .status = .passed,
+                        .status = if (failed) .failed else .passed,
                         .track_index = si + 1,
                     });
                 },
             }
-        } else if (i >= 3 * steps.len and i < 3 * steps.len + probes_count) {
-            const pi = i - 3 * steps.len;
+        } else if (i >= 2 + 4 * steps.len and i < 2 + 4 * steps.len + probes_count) {
+            const pi = i - 2 - 4 * steps.len;
             const probe = probes[pi];
             const label = switch (probe.kind) {
                 .data_probe => "DAT",
@@ -379,12 +419,12 @@ pub const Dashboard = struct {
                 .name = "selected",
                 .status = .observed,
             });
-        } else if (i == 3 * steps.len + probes_count) {
-            self.log(.info, "TRJ", "trajectory_finished", trajectory_name, tui.Color.hex(0x50FA7B));
-            out.emit(.{ .kind = .trajectory_finished, .trajectory = trajectory_name, .status = .passed });
-        } else if (i == 3 * steps.len + probes_count + 1) {
-            self.log(.success, "RUN", "run_finished", entry.name, tui.Color.hex(0x50FA7B));
-            out.emit(.{ .kind = .run_finished, .trajectory = trajectory_name, .status = .passed });
+        } else if (i == 2 + 4 * steps.len + probes_count) {
+            self.log(if (self.run_failed) .warn else .info, "TRJ", "trajectory_finished", trajectory_name, tui.Color.hex(if (self.run_failed) 0xFF5555 else 0x50FA7B));
+            out.emit(.{ .kind = .trajectory_finished, .trajectory = trajectory_name, .status = if (self.run_failed) .failed else .passed });
+        } else if (i == 2 + 4 * steps.len + probes_count + 1) {
+            self.log(if (self.run_failed) .warn else .success, "RUN", "run_finished", entry.name, tui.Color.hex(if (self.run_failed) 0xFF5555 else 0x50FA7B));
+            out.emit(.{ .kind = .run_finished, .trajectory = trajectory_name, .status = if (self.run_failed) .failed else .passed });
         } else {
             return false;
         }
@@ -395,6 +435,13 @@ pub const Dashboard = struct {
             self.pushSystem(.finished, "todos os eventos do fluxo foram observados · 100%", .{});
         }
         return true;
+    }
+
+    fn isBrowserStep(kind: dsl.StepKind) bool {
+        return switch (kind) {
+            .open, .type_into, .click, .hope_see => true,
+            else => false,
+        };
     }
 
     fn stepTrack(kind: dsl.StepKind) []const u8 {
@@ -928,6 +975,7 @@ pub fn run(
     semantic_context: trajectory.SemanticContext,
     allocator: std.mem.Allocator,
     io: std.Io,
+    browser: ?*browser_mod.Browser,
 ) !void {
 
     var term = try tui.terminal.Terminal.init(.{});
@@ -944,6 +992,7 @@ pub fn run(
     _ = &reader;
 
     var dash = Dashboard.init(suite);
+    dash.browser = browser;
     var console = trajectory.Console{
         .projection = projection,
         .sink = sink,
@@ -1007,6 +1056,7 @@ pub fn run(
             next_frame = now;
         }
     }
+    if (dash.run_failed) return error.BrowserExecutionFailed;
 }
 
 // ============================================
@@ -1026,7 +1076,7 @@ pub fn main(init: std.process.Init) !void {
     };
     const suite = buildSuite(&parsed_spec.steps, &profileProbes(selected_profile), build_options.spec, build_options.profile);
 
-    try run(suite, .tui, null, .{}, init.gpa, init.io);
+    try run(suite, .tui, null, .{}, init.gpa, init.io, null);
 }
 
 // ============================================

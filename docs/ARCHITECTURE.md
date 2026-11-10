@@ -32,16 +32,22 @@ Runner
    ├─ performance.*
    └─ discovery.*
    │
+   │
+   ├─ E2E browser executor
+   │    └─ Lightpanda CDP (127.0.0.1:9222)
+   │
    ▼
 OpenTrajectory-compatible event vocabulary
    │
    ├─ Trajectory
    ├─ Track
-   └─ Expansion
+   ├─ Expansion
+   ├─ Destination
+   └─ causal relations
    │
-   ├───────────────┬──────────────┐
-   ▼               ▼              ▼
-NDJSON           TUI          WebSocket
+   ├───────────────┬──────────────┬───────────────┐
+   ▼               ▼              ▼               ▼
+NDJSON           TUI          WebSocket     OpenTrajectory.Digital
                                  │
                                  ▼
                            Web dashboard
@@ -107,10 +113,18 @@ trajectory_finished
 run_finished
 ```
 
-The next adapters should keep this event contract unchanged:
+## Implemented runtime adapters
 
-1. Lightpanda CDP executor on `127.0.0.1:9222`, starting Lightpanda when unavailable.
-2. WebSocket hub for live dashboard clients.
-3. TUI renderer consuming the same event stream.
-4. OpenTrajectory.Digital exporter preserving Trajectory / Track / Expansion and causal relations.
-5. Data-plane adapters discovered from project configuration rather than hard-coded database vendors.
+- Lightpanda CDP executor on `127.0.0.1:9222`, auto-starting the local server when no endpoint is listening.
+- Browser actions for navigation, actor-bound input, selector/text click, and visible-destination assertions.
+- Per-step benchmark samples emitted into the same event stream.
+- WebSocket hub and TUI projections sharing the same sequenced events.
+- OpenTrajectory.Digital v1 exporter with Trajectory, Track, Expansion, Destination, semantic identity, and causal relations.
+
+## Next adapters
+
+1. Data-plane adapters discovered from project configuration rather than hard-coded database vendors.
+2. Browser extraction and semantic evidence via Lightpanda's `LP.getMarkdown` and accessibility-tree APIs.
+3. Selector fallback and retry policies for dynamic pages.
+4. Isolated per-run browser contexts and managed server lifecycle.
+5. OpenTelemetry correlation and trace export.
