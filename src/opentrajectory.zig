@@ -206,7 +206,7 @@ pub const Exporter = struct {
         else
             null;
         track.depth = if (event.parent_track_index > 0) 1 else 0;
-        track.attributes = self.attributes(event.semantic, event.track_index);
+        track.attributes = self.attributes(event.semantic, event.track_index, event.track);
         try self.writeEvent("track.started", track.snapshot(self.trajectory_id));
 
         if (previous > 0 and previous != index) {
@@ -317,7 +317,7 @@ pub const Exporter = struct {
                 .started_at = started_at,
                 .sequence = next_index,
                 .started_ns = nowNs(self.io),
-                .attributes = self.attributes(event.semantic, next_index),
+                .attributes = self.attributes(event.semantic, next_index, event.track),
             });
         }
         return &self.tracks.items[index - 1];
@@ -340,7 +340,7 @@ pub const Exporter = struct {
                 const now = nowNs(self.io);
                 break :blk if (now >= track.started_ns) (now - track.started_ns) / 1_000_000 else 0;
             },
-            .attributes = self.attributes(semantic, track.sequence),
+            .attributes = self.attributes(semantic, track.sequence, track.name),
         };
         try track.expansions.append(self.allocator(), item);
         return item;
@@ -359,16 +359,16 @@ pub const Exporter = struct {
             .fromTrackId = self.tracks.items[from_index - 1].id,
             .toTrackId = self.tracks.items[to_index - 1].id,
             .kind = kind,
-            .attributes = self.attributes(semantic, to_index),
+            .attributes = self.attributes(semantic, to_index, self.tracks.items[to_index - 1].name),
         };
         try self.relations.append(self.allocator(), relation);
         try self.writeEvent("relation.recorded", relation);
     }
 
-    fn attributes(self: *Exporter, semantic: trajectory.SemanticContext, index: usize) OtdAttributes {
+    fn attributes(self: *Exporter, semantic: trajectory.SemanticContext, index: usize, track_name: []const u8) OtdAttributes {
         const action_id = if (semantic.action_id.len > 0)
             semantic.action_id
-        else if (index > 0)
+        else if (index > 0 and std.mem.startsWith(u8, track_name, "browser."))
             std.fmt.allocPrint(self.allocator(), "action-{d}", .{index}) catch ""
         else
             "";
@@ -406,7 +406,7 @@ pub const Exporter = struct {
             .processUptimeMs = uptime,
             .processStartupMs = uptime,
             .status = self.trajectory_status,
-            .attributes = self.attributes(self.semantic, 0),
+            .attributes = self.attributes(self.semantic, 0, ""),
             .tracks = self.snapshot_tracks.items,
             .relations = self.relations.items,
             .destination = self.destination,
@@ -497,7 +497,7 @@ test "OpenTrajectory exporter preserves protocol identity and emits all relation
     _ = exporter.emit(.{ .kind = .track_started, .trajectory = "iti.intent-trajectory", .track = "assertion.see", .track_index = 5, .sequence = 6 });
 
     try std.testing.expectEqual(@as(usize, 5), exporter.tracks.items.len);
-    try std.testing.expectEqual(@as(usize, 5), exporter.relations.items.len);
+    try std.testing.expectEqual(@as(usize, 9), exporter.relations.items.len);
     try std.testing.expectEqualStrings("session-test", exporter.session_id);
     try std.testing.expectEqualStrings("correlation-test", exporter.semantic.correlation_id);
     try std.testing.expectEqualStrings("Human", exporter.tracks.items[0].attributes.actorType.?);
