@@ -161,9 +161,6 @@ pub const WebSocketClient = struct {
         self.io.random(&mask);
         @memcpy(header[header_len .. header_len + 4], &mask);
         header_len += 4;
-        if (std.mem.indexOf(u8, payload, "Browser.getVersion") != null or opcode == 0xA) {
-            std.debug.print("ITI WS tx opcode={d} header={any} payload={s}\\n", .{ opcode, header[0..header_len], payload });
-        }
         try self.writeAll(header[0..header_len]);
 
         var offset: usize = 0;
