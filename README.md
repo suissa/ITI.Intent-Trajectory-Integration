@@ -131,6 +131,32 @@ Implemented:
 Next runtime adapters are documented in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): real Lightpanda CDP execution, WebSocket server, OpenTrajectory exporter, and concrete data-plane probes.
 
 
+## Lightpanda CDP E2E runtime
+
+When the selected profile includes E2E (`standard` and `full`), ITI connects to the CDP endpoint at `127.0.0.1:9222`. If no server is listening, it starts `lightpanda serve --host 127.0.0.1 --port 9222` and waits for the WebSocket handshake before executing the browser suite.
+
+Install Lightpanda with the [official installer](https://lightpanda.io/docs/open-source/installation/):
+
+```bash
+curl -fsSL https://pkg.lightpanda.io/install.sh | bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Set `ITI_BASE_URL` to resolve relative `I OPEN` targets. Actor values are supplied through environment variables: `$customer.email` resolves to `ITI_CUSTOMER_EMAIL`, `$customer.password` to `ITI_CUSTOMER_PASSWORD`, and dots/hyphens become underscores. Literal values can be quoted in the DSL.
+
+```bash
+ITI_BASE_URL=http://127.0.0.1:3000 \
+ITI_CUSTOMER_EMAIL=customer@example.com \
+ITI_CUSTOMER_PASSWORD=secret \
+zig build run -Dprofile=standard -Dui=tui
+```
+
+A deterministic local browser smoke test is available:
+
+```bash
+ITI_CUSTOMER_EMAIL=smoke@example.com zig build run -Dspec=examples/e2e-smoke.iti -Dprofile=standard -Dui=ndjson
+```
+
 ## Realtime WebSocket event stream
 
 The same sequenced events emitted by the NDJSON runner and interactive TUI are published to a local WebSocket hub at `ws://127.0.0.1:7331`. The server starts with the ITI process; multiple clients can connect and receive the retained run history followed by live events.
