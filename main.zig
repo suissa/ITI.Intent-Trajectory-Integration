@@ -109,5 +109,5 @@ pub fn main(init: std.process.Init) !void {
         return;
     }
 
-    runner.runParsed(parsed_spec, selected_profile, selected_projection, build_options.profile, sink, semantic_context, browser);
+    try runner.runParsed(parsed_spec, selected_profile, selected_projection, build_options.profile, sink, semantic_context, browser);
 }
