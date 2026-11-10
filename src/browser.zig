@@ -57,7 +57,7 @@ pub const Browser = struct {
     }
 
     fn resolveUrl(self: *Browser, target: []const u8) ![]const u8 {
-        if (std.mem.startsWith(u8, target, "http://") or std.mem.startsWith(u8, target, "https://")) {
+        if (std.mem.startsWith(u8, target, "http://") or std.mem.startsWith(u8, target, "https://") or std.mem.startsWith(u8, target, "data:")) {
             return self.allocator.dupe(u8, target);
         }
         const base = self.environ.get("ITI_BASE_URL") orelse return error.MissingBaseUrl;
@@ -82,7 +82,7 @@ pub const Browser = struct {
 fn startLightpanda(allocator: std.mem.Allocator, io: std.Io) !void {
     const command =
         "command -v lightpanda >/dev/null 2>&1 || exit 127; " ++
-        "(nohup lightpanda serve --host 127.0.0.1 --port 9222 " ++
+        "(LIGHTPANDA_DISABLE_TELEMETRY=true nohup lightpanda serve --host 127.0.0.1 --port 9222 " ++
         ">\"${TMPDIR:-/tmp}/iti-lightpanda.log\" 2>&1 </dev/null &)";
     const result = try std.process.run(allocator, io, .{
         .argv = &.{ "sh", "-c", command },
