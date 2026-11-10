@@ -104,7 +104,7 @@ pub const WebSocketClient = struct {
         const response = response_buffer[0..used];
         if (!std.mem.startsWith(u8, response, "HTTP/1.1 101")) return Error.HandshakeFailed;
 
-        var accept_input: [key.len + websocket_guid.len]u8 = undefined;
+        var accept_input: [24 + websocket_guid.len]u8 = undefined;
         @memcpy(accept_input[0..key.len], key);
         @memcpy(accept_input[key.len..], websocket_guid);
         var digest: [20]u8 = undefined;
