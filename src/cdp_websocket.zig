@@ -1,9 +1,9 @@
 const std = @import("std");
-extern "c" fn c_socket(domain: c_int, socket_type: c_int, protocol: c_int) c_int;
-extern "c" fn c_connect(fd: c_int, address: *const anyopaque, address_len: u32) c_int;
-extern "c" fn c_read(fd: c_int, buffer: [*]u8, count: usize) isize;
-extern "c" fn c_write(fd: c_int, buffer: [*]const u8, count: usize) isize;
-extern "c" fn c_close(fd: c_int) c_int;
+const c_socket = @extern(*const fn (c_int, c_int, c_int) callconv(.c) c_int, .{ .name = "socket" });
+const c_connect = @extern(*const fn (c_int, *const anyopaque, u32) callconv(.c) c_int, .{ .name = "connect" });
+const c_read = @extern(*const fn (c_int, [*]u8, usize) callconv(.c) isize, .{ .name = "read" });
+const c_write = @extern(*const fn (c_int, [*]const u8, usize) callconv(.c) isize, .{ .name = "write" });
+const c_close = @extern(*const fn (c_int) callconv(.c) c_int, .{ .name = "close" });
 
 const SockAddrIn = extern struct {
     family: u16,
