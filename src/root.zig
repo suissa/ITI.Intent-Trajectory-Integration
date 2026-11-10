@@ -8,6 +8,7 @@ pub const cdp_websocket = @import("cdp_websocket.zig");
 pub const cdp = @import("cdp.zig");
 pub const browser = @import("browser.zig");
 pub const opentrajectory = @import("opentrajectory.zig");
+pub const data_plane = @import("data_plane.zig");
 
 test {
     _ = dsl;
@@ -20,4 +21,5 @@ test {
     _ = cdp;
     _ = browser;
     _ = opentrajectory;
+    _ = data_plane;
 }
