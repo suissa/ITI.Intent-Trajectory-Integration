@@ -12,6 +12,10 @@ pub fn build(b: *std.Build) void {
     options.addOption([]const u8, "profile", profile);
     options.addOption([]const u8, "ui", ui);
 
+    // The pinned TUI.zig revision still uses the removed ArrayList.writer API.
+    // Apply a small idempotent compatibility shim before compiling its module.
+    const patch_tui = b.addSystemCommand(&.{"sh", "scripts/patch-tui-renderer.sh"});
+
     const tui_dep = b.dependency("tui", .{
         .target = target,
         .optimize = optimize,
@@ -25,6 +29,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    exe.step.dependOn(&patch_tui.step);
     exe.root_module.addOptions("build_options", options);
     exe.root_module.addImport("tui", tui_dep.module("tui"));
     b.installArtifact(exe);
@@ -40,11 +45,12 @@ pub fn build(b: *std.Build) void {
     const dash_exe = b.addExecutable(.{
         .name = "iti-dashboard",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/dashboard.zig"),
+            .root_source_file = b.path("main.zig"),
             .target = target,
             .optimize = optimize,
         }),
     });
+    dash_exe.step.dependOn(&patch_tui.step);
     dash_exe.root_module.addOptions("build_options", options);
     dash_exe.root_module.addImport("tui", tui_dep.module("tui"));
     b.installArtifact(dash_exe);
@@ -63,6 +69,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    unit_tests.step.dependOn(&patch_tui.step);
     unit_tests.root_module.addImport("tui", tui_dep.module("tui"));
     const run_unit_tests = b.addRunArtifact(unit_tests);
 

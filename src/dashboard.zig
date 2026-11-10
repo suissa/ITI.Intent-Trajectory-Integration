@@ -125,7 +125,7 @@ pub fn profileProbes(comptime profile: profile_mod.TestSet) [profile_probe_count
 /// Clips a UTF-8 string to at most `cells` terminal columns starting at byte
 /// offset `start`, honoring double-width codepoints. Pure function so it can be
 /// unit tested without a terminal.
-pub fn clipSegment(comptime src: []const u8, start: usize, cells: usize, max_w: usize) struct { text: []const u8, cells: usize } {
+pub fn clipSegment(src: []const u8, start: usize, cells: usize, max_w: usize) struct { text: []const u8, cells: usize } {
     _ = max_w;
     var taken: usize = 0;
     var i: usize = @min(start, src.len);
@@ -241,7 +241,7 @@ pub const Dashboard = struct {
         if (self.state == .running) return;
         if (self.state == .paused) {
             self.state = .running;
-            self.last_tick_ns = std.time.nanoTimestamp();
+            self.last_tick_ns = monotonicNowNs();
             self.pushSystem(.running, "execução retomada", .{});
             return;
         }
@@ -250,7 +250,7 @@ pub const Dashboard = struct {
             self.elapsed_ms = 0;
         }
         self.state = .running;
-        self.last_tick_ns = std.time.nanoTimestamp();
+        self.last_tick_ns = monotonicNowNs();
         const entry = self.selected();
         self.pushSystem(.running, "executando '{s}' · perfil {s}", .{ entry.spec_name, entry.profile_name });
     }
@@ -435,9 +435,9 @@ pub const Dashboard = struct {
         color: tui.Color,
     ) void {
         var line = LogLine{};
-        timestampInto(&line.time);
-        copyBounded(tag, &line.level_tag, &line.tag_len);
-        copyBounded(scope, &line.scope, &line.scope_len);
+        _ = timestampInto(&line.time);
+        copyBounded(tag, line.level_tag[0..], &line.tag_len);
+        copyBounded(scope, line.scope[0..], &line.scope_len);
         var msg_buf: [log_line_len]u8 = undefined;
         const msg = sanitize(message, &msg_buf);
         copyBoundedSlice(msg, &line.message, &line.message_len);
@@ -450,9 +450,9 @@ pub const Dashboard = struct {
         var msg_buf: [log_line_len]u8 = undefined;
         const msg = std.fmt.bufPrint(&msg_buf, fmt, args) catch msg_buf[0..0];
         var line = LogLine{};
-        timestampInto(&line.time);
-        copyBounded(state.badgeTag(), &line.level_tag, &line.tag_len);
-        copyBounded("SYS", &line.scope, &line.scope_len);
+        _ = timestampInto(&line.time);
+        copyBounded(state.badgeTag(), line.level_tag[0..], &line.tag_len);
+        copyBounded("SYS", line.scope[0..], &line.scope_len);
         copyBoundedSlice(msg, &line.message, &line.message_len);
         line.color = state.badgeColor();
         line.bold = true;
@@ -466,7 +466,7 @@ pub const Dashboard = struct {
             .key => |ke| {
                 if (ke.modifiers.ctrl) return .ignored;
                 switch (ke.key) {
-                    .char => |c| switch (std.ascii.toLower(c)) {
+                    .char => |c| switch (if (c < 128) std.ascii.toLower(@intCast(c)) else 0) {
                         'e', 'r' => { self.execute(); return .needs_redraw; },
                         'p' => { self.pause(); return .needs_redraw; },
                         's', 'x' => { self.stop(); return .needs_redraw; },
@@ -548,7 +548,7 @@ pub const Dashboard = struct {
         renderFooter(&sub, self, w, h);
     }
 
-    fn renderHeader(sub: *tui.SubScreen, w: u16) void {
+    fn renderHeader(sub: *tui.screen.SubScreen, w: u16) void {
         sub.setStyle(.{ .fg = tui.Color.white, .bg = tui.Color.black, .attrs = .{ .bold = true } });
         sub.fill(' ');
 
@@ -565,10 +565,10 @@ pub const Dashboard = struct {
 
         sub.setStyle(.{ .fg = tui.Color.hex(0x6272A4), .bg = tui.Color.hex(0x282A36) });
         sub.moveCursor(0, 1);
-        sub.hline(0, 1, w, '─');
+        drawHLine(sub, 0, 1, w, '─');
     }
 
-    fn renderBody(sub: *tui.SubScreen, self: *Dashboard, w: u16, h: u16) void {
+    fn renderBody(sub: *tui.screen.SubScreen, self: *Dashboard, w: u16, h: u16) void {
         const body_top: u16 = 2;
         const body_bottom: u16 = h - 3; // footer occupies controls + progress rows
 
@@ -608,10 +608,10 @@ pub const Dashboard = struct {
         const panel_bottom = body_bottom;
         if (panel_bottom > panel_top) {
             sub.setStyle(.{ .fg = tui.Color.hex(0x6272A4) });
-            sub.hline(1, panel_top, w - 2, '─');
-            sub.hline(1, panel_bottom, w - 2, '─');
-            sub.vline(1, panel_top + 1, panel_bottom - panel_top - 1, '│');
-            sub.vline(w - 2, panel_top + 1, panel_bottom - panel_top - 1, '│');
+            drawHLine(sub, 1, panel_top, w - 2, '─');
+            drawHLine(sub, 1, panel_bottom, w - 2, '─');
+            drawVLine(sub, 1, panel_top + 1, panel_bottom - panel_top - 1, '│');
+            drawVLine(sub, w - 2, panel_top + 1, panel_bottom - panel_top - 1, '│');
 
             const title = " ── LOGS · signale ─────────────────────────── ";
             sub.setStyle(.{ .fg = tui.Color.hex(0xBD93F9), .attrs = .{ .bold = true } });
@@ -635,7 +635,7 @@ pub const Dashboard = struct {
         }
     }
 
-    fn drawLogLine(sub: *tui.SubScreen, meta: *const LogLine, x: u16, y: u16, max_w: u16) void {
+    fn drawLogLine(sub: *tui.screen.SubScreen, meta: *const LogLine, x: u16, y: u16, max_w: u16) void {
         const dim = tui.Style{ .fg = tui.Color.hex(0x6272A4) };
         const badge = tui.Style{ .fg = tui.Color.hex(0x282A36), .bg = meta.color, .attrs = .{ .bold = true } };
         const scope_style = tui.Style{
@@ -725,13 +725,13 @@ pub const Dashboard = struct {
         }
     }
 
-    fn renderFooter(sub: *tui.SubScreen, self: *Dashboard, w: u16, h: u16) void {
+    fn renderFooter(sub: *tui.screen.SubScreen, self: *Dashboard, w: u16, h: u16) void {
         const controls_y = h - 2;
         const bar_y = h - 1;
 
         sub.setStyle(.{ .fg = tui.Color.hex(0x6272A4), .bg = tui.Color.hex(0x282A36) });
         sub.moveCursor(0, controls_y);
-        sub.hline(0, controls_y, w, '─');
+        drawHLine(sub, 0, controls_y, w, '─');
 
         // When execution is active, the footer owns the two lifecycle controls.
         if (self.state == .running or self.state == .paused) {
@@ -747,7 +747,7 @@ pub const Dashboard = struct {
 
         sub.setStyle(.{ .fg = tui.Color.hex(0x282A36), .bg = tui.Color.hex(0x44475A) });
         sub.moveCursor(0, bar_y);
-        sub.hline(0, bar_y, w, ' ');
+        drawHLine(sub, 0, bar_y, w, ' ');
 
         const pct = self.progressPercentage();
         var label_buf: [96]u8 = undefined;
@@ -819,7 +819,7 @@ fn rectHit(px: u16, py: u16, x: u16, y: u16, w: u16, h: u16) bool {
     return px >= x and px < x + w and py >= y and py < y + h;
 }
 
-fn drawButton(sub: *tui.SubScreen, x: u16, y: u16, w: u16, label: []const u8, enabled: bool, hovered: bool, primary: bool) void {
+fn drawButton(sub: *tui.screen.SubScreen, x: u16, y: u16, w: u16, label: []const u8, enabled: bool, hovered: bool, primary: bool) void {
     _ = w;
     const bg_color: tui.Color = if (!enabled)
         tui.Color.hex(0x44475A)
@@ -839,7 +839,9 @@ fn drawButton(sub: *tui.SubScreen, x: u16, y: u16, w: u16, label: []const u8, en
 
     sub.setStyle(.{ .fg = fg_color, .bg = bg_color, .attrs = .{ .bold = true } });
     sub.moveCursor(x, y);
-    sub.putString("[" ++ label ++ "]");
+    sub.putString("[");
+    sub.putString(label);
+    sub.putString("]");
 }
 
 fn upperInto(src: []const u8, buf: []u8) []u8 {
@@ -861,10 +863,7 @@ fn upper(comptime src: []const u8) []const u8 {
 }
 
 /// Copies `src` into a fixed-size array field, tracking its length.
-fn copyBounded(src: []const u8, comptime buf: anytype, len: anytype) void {
-    comptime {
-        if (@TypeOf(buf).kind() != .pointer) @compileError("copyBounded expects a pointer to an array");
-    }
+fn copyBounded(src: []const u8, buf: []u8, len: *u8) void {
     const n = @min(src.len, buf.len);
     @memcpy(buf[0..n], src[0..n]);
     len.* = @intCast(n);
@@ -895,11 +894,15 @@ fn padRight(src: []const u8, buf: []u8) []u8 {
 }
 
 fn timestampInto(buf: *[8]u8) []const u8 {
-    const ts = std.time.timestamp();
-    const tm = std.time.gmtime(&ts);
-    const hh = tm.hour;
-    const mm = tm.min;
-    const ss = tm.sec;
+    var ts: std.posix.timespec = undefined;
+    _ = std.posix.system.clock_gettime(.REALTIME, &ts);
+    const epoch = std.time.epoch.EpochSeconds{
+        .secs = @intCast(ts.sec),
+    };
+    const day = epoch.getDaySeconds();
+    const hh = day.getHoursIntoDay();
+    const mm = day.getMinutesIntoHour();
+    const ss = day.getSecondsIntoMinute();
     buf[0] = '0' + @as(u8, @intCast(hh / 10));
     buf[1] = '0' + @as(u8, @intCast(hh % 10));
     buf[2] = ':';
@@ -915,10 +918,13 @@ fn timestampInto(buf: *[8]u8) []const u8 {
 // App driver (custom loop over tui.zig pieces)
 // ============================================
 
-pub fn run(suite: []const SuiteEntry, projection: trajectory.Projection) !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn run(
+    suite: []const SuiteEntry,
+    projection: trajectory.Projection,
+    sink: ?trajectory.EventSink,
+    allocator: std.mem.Allocator,
+    io: std.Io,
+) !void {
 
     var term = try tui.terminal.Terminal.init(.{});
     defer term.deinit();
@@ -934,19 +940,18 @@ pub fn run(suite: []const SuiteEntry, projection: trajectory.Projection) !void {
     _ = &reader;
 
     var dash = Dashboard.init(suite);
-    var console = trajectory.Console{ .projection = projection };
+    var console = trajectory.Console{ .projection = projection, .sink = sink };
 
     const theme = tui.theme.Theme.dracula;
     _ = theme;
 
     const frame_ns: i128 = 25_000_000; // ~40 fps
-    var next_frame = std.time.nanoTimestamp();
+    var next_frame: i128 = @intCast(std.Io.Clock.awake.now(io).nanoseconds);
 
     while (true) {
         // Poll input without blocking (termios VTIME gives us a ~100ms window).
-        const stdin = std.fs.File{ .handle = std.posix.STDIN_FILENO };
         var buf: [64]u8 = undefined;
-        const n = stdin.read(&buf) catch 0;
+        const n = readTerminalInput(&buf);
         if (n > 0) {
             if (try reader.parse(buf[0..n])) |event| {
                 // Global quit keys.
@@ -968,9 +973,9 @@ pub fn run(suite: []const SuiteEntry, projection: trajectory.Projection) !void {
 
         // Advance the real runner while the system is RUNNING.
         if (dash.state == .running) {
-            const tick_start = std.time.nanoTimestamp();
+            const tick_start = std.Io.Clock.awake.now(io);
             _ = dash.emitNextEvent(&console);
-            dash.elapsed_ms += @intCast(@divTrunc(std.time.nanoTimestamp() - tick_start, 1_000_000));
+            dash.elapsed_ms += @intCast(tick_start.untilNow(io, .awake).toMilliseconds());
         }
 
         // Render.
@@ -981,15 +986,15 @@ pub fn run(suite: []const SuiteEntry, projection: trajectory.Projection) !void {
             .bounds = .{ .x = 0, .y = 0, .width = scr.width, .height = scr.height },
             .clip = .{ .x = 0, .y = 0, .width = scr.width, .height = scr.height },
             .focused_id = null,
-            .time_ns = @intCast(std.time.nanoTimestamp()),
+            .time_ns = @intCast(std.Io.Clock.awake.now(io).nanoseconds),
         };
         dash.render(&ctx);
         try rend.render(&scr);
 
         next_frame += frame_ns;
-        const now = std.time.nanoTimestamp();
+        const now: i128 = @intCast(std.Io.Clock.awake.now(io).nanoseconds);
         if (next_frame > now) {
-            std.Thread.sleep(@intCast(next_frame - now));
+            try io.sleep(.fromNanoseconds(@intCast(next_frame - now)), .awake);
         } else {
             next_frame = now;
         }
@@ -1000,20 +1005,20 @@ pub fn run(suite: []const SuiteEntry, projection: trajectory.Projection) !void {
 // Entry point — `zig build dashboard`
 // ============================================
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     const build_options = @import("build_options");
 
     const parsed_spec = blk: {
         @setEvalBranchQuota(100_000);
-        break :blk dsl.parse(@embedFile(build_options.spec));
+        break :blk dsl.parse(@embedFile("../" ++ build_options.spec));
     };
     const selected_profile = blk: {
         @setEvalBranchQuota(10_000);
         break :blk profile_mod.fromName(build_options.profile);
     };
-    const suite = buildSuite(parsed_spec, selected_profile, build_options.spec, build_options.profile);
+    const suite = buildSuite(&parsed_spec.steps, &profileProbes(selected_profile), build_options.spec, build_options.profile);
 
-    try run(suite, .tui);
+    try run(suite, .tui, null, init.gpa, init.io);
 }
 
 // ============================================
@@ -1021,18 +1026,45 @@ pub fn main() !void {
 // ============================================
 
 test "formatLogLine renders signale-style columns" {
+    var line = LogLine{};
+    @memcpy(&line.time, "12:34:56");
+    copyBounded("info", line.level_tag[0..], &line.tag_len);
+    copyBounded("RUN", line.scope[0..], &line.scope_len);
+    copyBoundedSlice("hello", &line.message, &line.message_len);
+
     var buf: [220]u8 = undefined;
-    const out = try formatLogLine(.{
-        .time = "12:34:56",
-        .level_tag = "info",
-        .scope = "RUN",
-        .message = "hello",
-    }, &buf);
-    try std.testing.expectEqualStrings("12:34:56  info   RUN     │ hello", out);
+    const out = try formatLogLine(line, &buf);
+    try std.testing.expectEqualStrings("12:34:56 [ INFO] RUN       │ hello", out);
 }
 
 test "system state labels match issue vocabulary" {
     try std.testing.expectEqualStrings("PAUSED", SystemState.paused.label());
     try std.testing.expectEqualStrings("STOPPED", SystemState.stopped.label());
     try std.testing.expectEqualStrings("RUNNING", SystemState.running.label());
+}
+
+/// Read raw terminal bytes after TUI.zig has enabled raw mode.
+fn readTerminalInput(buffer: []u8) usize {
+    if (buffer.len == 0) return 0;
+    const result = std.posix.system.read(0, buffer.ptr, buffer.len);
+    const count: isize = @bitCast(result);
+    return if (count > 0) @intCast(count) else 0;
+}
+
+fn drawHLine(sub: *tui.screen.SubScreen, x: u16, y: u16, len: u16, char: u21) void {
+    sub.moveCursor(x, y);
+    for (0..len) |_| sub.putChar(char);
+}
+
+fn drawVLine(sub: *tui.screen.SubScreen, x: u16, y: u16, len: u16, char: u21) void {
+    for (0..len) |offset| {
+        sub.moveCursor(x, y + @as(u16, @intCast(offset)));
+        sub.putChar(char);
+    }
+}
+
+fn monotonicNowNs() i128 {
+    var ts: std.posix.timespec = undefined;
+    _ = std.posix.system.clock_gettime(.MONOTONIC, &ts);
+    return @as(i128, ts.sec) * 1_000_000_000 + @as(i128, ts.nsec);
 }

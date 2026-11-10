@@ -15,11 +15,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@v2
         with:
           version: 0.16.0
+
+      - name: Build application and dashboard
+        run: zig build
 
       - name: Run tests
         run: zig build test

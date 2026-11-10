@@ -129,3 +129,16 @@ Implemented:
 - DSL parser tests.
 
 Next runtime adapters are documented in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): real Lightpanda CDP execution, WebSocket server, OpenTrajectory exporter, and concrete data-plane probes.
+
+
+## Realtime WebSocket event stream
+
+The same sequenced events emitted by the NDJSON runner and interactive TUI are published to a local WebSocket hub at `ws://127.0.0.1:7331`. The server starts with the ITI process; multiple clients can connect and receive the retained run history followed by live events.
+
+```bash
+zig build run -Dui=tui
+```
+
+Open `web/index.html` in a browser while the TUI process is running. The page subscribes to the snapshot/replay protocol and renders the event stream; it does not execute tests. The hub retains the latest 2,048 events. Clients that reconnect with a stale cursor receive a fresh snapshot instead of blocking the runner. The server binds to loopback only and does not expose an unauthenticated remote listener.
+
+WebSocket protocol frames carry `protocol: "iti.trajectory"`, `version: 1`, a process `sessionId`, and monotonic sequence numbers. The TUI and browser consume the same Event values from `trajectory.Console`.
