@@ -915,7 +915,11 @@ fn timestampInto(buf: *[8]u8) []const u8 {
 // App driver (custom loop over tui.zig pieces)
 // ============================================
 
-pub fn run(suite: []const SuiteEntry, projection: trajectory.Projection) !void {
+pub fn run(
+    suite: []const SuiteEntry,
+    projection: trajectory.Projection,
+    sink: ?trajectory.EventSink,
+) !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
@@ -934,7 +938,7 @@ pub fn run(suite: []const SuiteEntry, projection: trajectory.Projection) !void {
     _ = &reader;
 
     var dash = Dashboard.init(suite);
-    var console = trajectory.Console{ .projection = projection };
+    var console = trajectory.Console{ .projection = projection, .sink = sink };
 
     const theme = tui.theme.Theme.dracula;
     _ = theme;
@@ -1000,7 +1004,8 @@ pub fn run(suite: []const SuiteEntry, projection: trajectory.Projection) !void {
 // Entry point — `zig build dashboard`
 // ============================================
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    _ = init;
     const build_options = @import("build_options");
 
     const parsed_spec = blk: {
@@ -1013,7 +1018,7 @@ pub fn main() !void {
     };
     const suite = buildSuite(parsed_spec, selected_profile, build_options.spec, build_options.profile);
 
-    try run(suite, .tui);
+    try run(suite, .tui, null);
 }
 
 // ============================================
