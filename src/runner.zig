@@ -12,7 +12,7 @@ pub fn runParsed(
     sink: ?trajectory.EventSink,
     semantic_context: trajectory.SemanticContext,
     browser: ?*browser_mod.Browser,
-) void {
+) !void {
     var out = trajectory.Console{
         .projection = projection,
         .sink = sink,
@@ -108,6 +108,7 @@ pub fn runParsed(
         .trajectory = trajectory_name,
         .status = if (run_failed) .failed else .passed,
     });
+    if (run_failed) return error.BrowserExecutionFailed;
 }
 
 fn isBrowserStep(kind: dsl.StepKind) bool {
