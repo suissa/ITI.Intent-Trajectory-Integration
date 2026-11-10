@@ -1034,7 +1034,7 @@ test "formatLogLine renders signale-style columns" {
 
     var buf: [220]u8 = undefined;
     const out = try formatLogLine(line, &buf);
-    try std.testing.expectEqualStrings("12:34:56  info   RUN     │ hello", out);
+    try std.testing.expectEqualStrings("12:34:56 [ INFO] RUN       │ hello", out);
 }
 
 test "system state labels match issue vocabulary" {
