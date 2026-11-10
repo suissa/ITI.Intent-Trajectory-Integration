@@ -36,16 +36,6 @@ pub fn runParsed(
         const track = trackName(step.kind);
         var step_failed = false;
         var duration_ms: u64 = 0;
-        if (browser) |runtime| {
-            if (isBrowserStep(step.kind)) {
-                duration_ms = runtime.execute(step) catch |err| blk: {
-                    step_failed = true;
-                    run_failed = true;
-                    std.debug.print("ITI browser step failed: {s}: {s}\\n", .{ step.raw, @errorName(err) });
-                    break :blk 0;
-                };
-            }
-        }
         out.emit(.{
             .kind = .track_started,
             .trajectory = trajectory_name,
@@ -53,6 +43,16 @@ pub fn runParsed(
             .name = step.raw,
             .track_index = track_index,
         });
+        if (browser) |runtime| {
+            if (isBrowserStep(step.kind)) {
+                duration_ms = runtime.execute(step) catch |err| blk: {
+                    step_failed = true;
+                    run_failed = true;
+                    std.debug.print("ITI browser step failed: {s}: {s}\n", .{ step.raw, @errorName(err) });
+                    break :blk 0;
+                };
+            }
+        }
 
         if (step.kind == .hope or step.kind == .hope_see) {
             out.emit(.{
@@ -60,7 +60,7 @@ pub fn runParsed(
                 .trajectory = trajectory_name,
                 .track = track,
                 .name = step.object,
-                .status = .passed,
+                .status = if (step_failed) .failed else .passed,
                 .track_index = track_index,
             });
         } else {
@@ -69,7 +69,7 @@ pub fn runParsed(
                 .trajectory = trajectory_name,
                 .track = track,
                 .name = step.raw,
-                .status = .observed,
+                .status = if (step_failed) .failed else .observed,
                 .track_index = track_index,
             });
         }
