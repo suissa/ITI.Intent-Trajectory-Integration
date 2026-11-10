@@ -185,16 +185,6 @@ fn probe(out: *trajectory.Console, trajectory_name: []const u8, name: []const u8
     });
 }
 
-fn data(out: *trajectory.Console, trajectory_name: []const u8, name: []const u8) void {
-    out.emit(.{
-        .kind = .data_probe,
-        .trajectory = trajectory_name,
-        .track = name,
-        .name = "selected",
-        .status = .observed,
-    });
-}
-
 fn data(
     out: *trajectory.Console,
     trajectory_name: []const u8,
