@@ -21,6 +21,7 @@ const dsl = @import("dsl.zig");
 const profile_mod = @import("profile.zig");
 const trajectory = @import("trajectory.zig");
 const browser_mod = @import("browser.zig");
+const data_plane = @import("data_plane.zig");
 
 /// Path to the spec file embedded by `dashboardMain` when no `-Dspec` was given.
 const default_spec = "examples/login.iti";
@@ -93,6 +94,15 @@ pub fn buildSuite(
 }
 
 pub const ProbeDesc = struct { kind: trajectory.EventKind, name: []const u8 };
+
+const ProbeEvent = struct {
+    kind: trajectory.EventKind,
+    track: []const u8,
+    name: []const u8,
+    status: trajectory.Status = .observed,
+    duration_ms: u64 = 0,
+    duration_sample: bool = false,
+};
 
 fn profile_probe_count(comptime profile: profile_mod.TestSet) usize {
     var count: usize = 0;
@@ -210,6 +220,12 @@ pub const Dashboard = struct {
     last_step_failed: bool = false,
     run_failed: bool = false,
     last_step_duration_ms: u64 = 0,
+    allocator: ?std.mem.Allocator = null,
+    io: ?std.Io = null,
+    data_plane: ?*data_plane.Runtime = null,
+    semantic_context: trajectory.SemanticContext = .{},
+    probe_events: []ProbeEvent = &.{},
+    probe_offsets: []usize = &.{},
 
     log_meta: [max_log_lines]LogLine = [_]LogLine{.{}} ** max_log_lines,
     log_count: usize = 0,
@@ -230,10 +246,142 @@ pub const Dashboard = struct {
         return self;
     }
 
+    pub fn deinit(self: *Dashboard) void {
+        if (self.allocator) |allocator| {
+            if (self.probe_events.len > 0) allocator.free(self.probe_events);
+            if (self.probe_offsets.len > 0) allocator.free(self.probe_offsets);
+        }
+    }
+
+    fn probeCount(self: *const Dashboard, test_index: usize) usize {
+        if (self.probe_offsets.len == self.suite.len + 1) {
+            return self.probe_offsets[test_index + 1] - self.probe_offsets[test_index];
+        }
+        return self.suite[test_index].probes.len;
+    }
+
+    fn probeEventAt(self: *const Dashboard, test_index: usize, probe_index: usize) ProbeEvent {
+        if (self.probe_offsets.len == self.suite.len + 1) {
+            return self.probe_events[self.probe_offsets[test_index] + probe_index];
+        }
+        const descriptor = self.suite[test_index].probes[probe_index];
+        return .{
+            .kind = descriptor.kind,
+            .track = descriptor.name,
+            .name = "selected",
+        };
+    }
+
     fn totalEvents(self: *Dashboard) void {
         var total: usize = 0;
-        for (self.suite) |entry| total += 4 * entry.steps.len + entry.probes.len + 4;
+        for (self.suite, 0..) |entry, index| {
+            total += 4 * entry.steps.len + self.probeCount(index) + 4;
+        }
         self.total_events = total;
+    }
+
+    fn prepareProbes(self: *Dashboard) !void {
+        const allocator = self.allocator orelse return error.DashboardAllocatorMissing;
+        const io = self.io orelse return error.DashboardIoMissing;
+        const runtime = self.data_plane orelse return;
+
+        if (self.probe_events.len > 0) allocator.free(self.probe_events);
+        if (self.probe_offsets.len > 0) allocator.free(self.probe_offsets);
+        self.probe_events = &.{};
+        self.probe_offsets = &.{};
+
+        var events: std.ArrayListUnmanaged(ProbeEvent) = .empty;
+        errdefer events.deinit(allocator);
+        var offsets: std.ArrayListUnmanaged(usize) = .empty;
+        errdefer offsets.deinit(allocator);
+        try offsets.append(allocator, 0);
+
+        const context = data_plane.ProbeContext{
+            .correlation_id = self.semantic_context.correlation_id,
+            .causation_id = self.semantic_context.causation_id,
+            .actor_type = self.semantic_context.actor_type,
+            .subject_id = self.semantic_context.subject_id,
+            .intent_id = self.semantic_context.intent_id,
+            .behavior_id = self.semantic_context.behavior_id,
+            .action_id = self.semantic_context.action_id,
+        };
+        var failed = false;
+
+        for (self.suite) |entry| {
+            for (entry.probes) |probe| {
+                if (probe.kind != .data_probe) {
+                    try events.append(allocator, .{
+                        .kind = probe.kind,
+                        .track = probe.name,
+                        .name = "selected",
+                    });
+                    continue;
+                }
+
+                const capability = capabilityFromProbeName(probe.name) orelse return error.UnknownDataProbe;
+                const track = dataProbeTrack(capability);
+                const outcomes = try runtime.registry.probeAll(capability, io, context);
+                defer runtime.registry.allocator.free(outcomes);
+
+                if (outcomes.len == 0) {
+                    const configured = runtime.registry.adapters.items.len > 0;
+                    try events.append(allocator, .{
+                        .kind = .data_probe,
+                        .track = track,
+                        .name = if (configured) "no-adapter-supports-capability" else "no-adapter-configured",
+                        .status = if (configured) .failed else .observed,
+                    });
+                    failed = failed or configured;
+                    continue;
+                }
+
+                for (outcomes) |outcome| {
+                    const status: trajectory.Status = switch (outcome.result.status) {
+                        .passed => .passed,
+                        .failed => .failed,
+                        .skipped => .observed,
+                    };
+                    try events.append(allocator, .{
+                        .kind = .data_probe,
+                        .track = track,
+                        .name = outcome.adapter_id,
+                        .status = status,
+                    });
+                    try events.append(allocator, .{
+                        .kind = .benchmark_sample,
+                        .track = track,
+                        .name = "",
+                        .status = .observed,
+                        .duration_ms = outcome.result.duration_ms,
+                        .duration_sample = true,
+                    });
+                    if (outcome.result.status == .failed) failed = true;
+                }
+            }
+            try offsets.append(allocator, events.items.len);
+        }
+
+        self.probe_events = try events.toOwnedSlice(allocator);
+        self.probe_offsets = try offsets.toOwnedSlice(allocator);
+        self.run_failed = failed;
+        self.totalEvents();
+    }
+
+    fn capabilityFromProbeName(name: []const u8) ?data_plane.Capability {
+        if (!std.mem.startsWith(u8, name, "data_")) return null;
+        return std.meta.stringToEnum(data_plane.Capability, name["data_".len..]);
+    }
+
+    fn dataProbeTrack(capability: data_plane.Capability) []const u8 {
+        return switch (capability) {
+            .read => "data.read",
+            .write => "data.write",
+            .cache => "data.cache",
+            .search => "data.search",
+            .vector => "data.vector",
+            .graph => "data.graph",
+            .events => "data.events",
+        };
     }
 
     fn selected(self: *Dashboard) SuiteEntry {
@@ -250,10 +398,16 @@ pub const Dashboard = struct {
             self.pushSystem(.running, "execução retomada", .{});
             return;
         }
-        if (self.state == .stopped or self.state == .finished) {
+        if (self.state == .stopped or self.state == .finished or self.state == .idle) {
             self.emitted_events = 0;
             self.elapsed_ms = 0;
             self.run_failed = false;
+            self.prepareProbes() catch |err| {
+                self.run_failed = true;
+                self.state = .stopped;
+                self.pushSystem(.stopped, "DataPlane probe preparation failed: {s}", .{@errorName(err)});
+                return;
+            };
         }
         self.state = .running;
         self.last_tick_ns = monotonicNowNs();
@@ -298,20 +452,21 @@ pub const Dashboard = struct {
     /// Emits the next pending trajectory event of the selected test through the
     /// shared Console projection AND mirrors it into the dashboard log stream.
     fn emitNextEvent(self: *Dashboard, out: *trajectory.Console) bool {
-        const entry = self.selected();
-        const steps = entry.steps;
-        const probes = entry.probes;
-        const trajectory_name = "iti.intent-trajectory";
-
-        const probes_count = probes.len;
-        const per_test = 4 * steps.len + probes_count + 4;
-
         var test_index: usize = 0;
         var base: usize = 0;
         while (test_index < self.suite.len) : (test_index += 1) {
-            if (base + per_test > self.emitted_events) break;
-            base += per_test;
+            const candidate = self.suite[test_index];
+            const candidate_count = 4 * candidate.steps.len + self.probeCount(test_index) + 4;
+            if (base + candidate_count > self.emitted_events) break;
+            base += candidate_count;
         }
+        if (test_index >= self.suite.len) return false;
+        self.current_test = test_index;
+        const entry = self.suite[test_index];
+        const steps = entry.steps;
+        const probes_count = self.probeCount(test_index);
+        const trajectory_name = "iti.intent-trajectory";
+        const per_test = 4 * steps.len + probes_count + 4;
         if (base + per_test <= self.emitted_events) return false;
 
         const i = self.emitted_events - base;
@@ -405,19 +560,24 @@ pub const Dashboard = struct {
             }
         } else if (i >= 2 + 4 * steps.len and i < 2 + 4 * steps.len + probes_count) {
             const pi = i - 2 - 4 * steps.len;
-            const probe = probes[pi];
+            const probe = self.probeEventAt(test_index, pi);
             const label = switch (probe.kind) {
                 .data_probe => "DAT",
                 .benchmark_sample => "PRF",
                 else => "PRB",
             };
-            self.log(.action, label, @tagName(probe.kind), probe.name, tui.Color.hex(0xFFB86C));
+            var duration_buffer: [64]u8 = undefined;
+            const event_name = if (probe.duration_sample)
+                std.fmt.bufPrint(&duration_buffer, "duration_ms={d}", .{probe.duration_ms}) catch "duration_ms=0"
+            else
+                probe.name;
+            self.log(if (probe.status == .failed) .warn else .action, label, @tagName(probe.kind), event_name, tui.Color.hex(if (probe.status == .failed) 0xFF5555 else 0xFFB86C));
             out.emit(.{
                 .kind = probe.kind,
                 .trajectory = trajectory_name,
-                .track = probe.name,
-                .name = "selected",
-                .status = .observed,
+                .track = probe.track,
+                .name = event_name,
+                .status = probe.status,
             });
         } else if (i == 2 + 4 * steps.len + probes_count) {
             self.log(if (self.run_failed) .warn else .info, "TRJ", "trajectory_finished", trajectory_name, tui.Color.hex(if (self.run_failed) 0xFF5555 else 0x50FA7B));
@@ -976,6 +1136,7 @@ pub fn run(
     allocator: std.mem.Allocator,
     io: std.Io,
     browser: ?*browser_mod.Browser,
+    data_plane_runtime: *data_plane.Runtime,
 ) !void {
 
     var term = try tui.terminal.Terminal.init(.{});
@@ -992,7 +1153,12 @@ pub fn run(
     _ = &reader;
 
     var dash = Dashboard.init(suite);
+    defer dash.deinit();
     dash.browser = browser;
+    dash.allocator = allocator;
+    dash.io = io;
+    dash.data_plane = data_plane_runtime;
+    dash.semantic_context = semantic_context;
     var console = trajectory.Console{
         .projection = projection,
         .sink = sink,
