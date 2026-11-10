@@ -31,7 +31,7 @@ pub const Hub = struct {
     session_id_len: usize = 0,
     server_state: std.atomic.Value(u8) = .init(0),
 
-    pub fn init(io: Io) !Hub {
+    pub fn init(io: Io) Io.RandomSecureError!Hub {
         var random: [16]u8 = undefined;
         try Io.randomSecure(io, &random);
 
