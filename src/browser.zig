@@ -19,7 +19,7 @@ pub const Browser = struct {
 
         try startLightpanda(allocator, io);
         for (0..50) |_| {
-            std.Thread.sleep(100_000_000);
+            try io.sleep(.fromMilliseconds(100), .awake);
             if (cdp.Client.connect(allocator, io)) |client| {
                 return .{ .allocator = allocator, .io = io, .environ = environ, .client = client };
             } else |_| {}
