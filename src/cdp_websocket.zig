@@ -215,10 +215,14 @@ pub const WebSocketClient = struct {
         self.writeAll(req) catch return Error.WriteFailed;
 
         // Read response - look for "101 Switching Protocols"
-        const n = self.rawRead(self.read_buf) catch return Error.ReadFailed;
-        if (n == 0) return Error.HandshakeFailed;
-
-        const response = self.read_buf[0..n];
+        var received: usize = 0;
+        while (received < self.read_buf.len) {
+            const n = self.rawRead(self.read_buf[received..]) catch return Error.ReadFailed;
+            if (n == 0) return Error.HandshakeFailed;
+            received += n;
+            if (std.mem.indexOf(u8, self.read_buf[0..received], "\\r\\n\\r\\n") != null) break;
+        }
+        const response = self.read_buf[0..received];
         if (!std.mem.startsWith(u8, response, "HTTP/1.1 101")) {
             return Error.HandshakeFailed;
         }
