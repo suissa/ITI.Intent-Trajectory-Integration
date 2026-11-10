@@ -37,7 +37,7 @@ pub const WebSocketClient = struct {
     };
 
     /// Connect to a loopback WebSocket endpoint. url must be like "ws://host:port/path".
-    pub fn c_connect(allocator: std.mem.Allocator, io: std.Io, url: []const u8, read_buf: []u8) !WebSocketClient {
+    pub fn connect(allocator: std.mem.Allocator, io: std.Io, url: []const u8, read_buf: []u8) !WebSocketClient {
         if (@import("builtin").os.tag == .windows) return Error.ConnectionFailed;
         const parsed = try parseWsUrl(url);
 
@@ -92,7 +92,7 @@ pub const WebSocketClient = struct {
         return self.readFrameAlloc(allocator, max_size);
     }
 
-    pub fn c_close(self: *WebSocketClient) void {
+    pub fn close(self: *WebSocketClient) void {
         if (self.connected) {
             // Send close frame (opcode 8), best effort
             self.writeFrame(0x8, &.{}) catch {};
