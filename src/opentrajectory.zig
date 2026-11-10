@@ -206,7 +206,8 @@ pub const Exporter = struct {
         else
             null;
         track.depth = if (event.parent_track_index > 0) 1 else 0;
-        track.attributes = self.attributes(event.semantic, event.track_index, event.track);
+        const semantic = self.effectiveSemantic(event.semantic);
+        track.attributes = self.attributes(semantic, event.track_index, event.track);
         try self.writeEvent("track.started", track.snapshot(self.trajectory_id));
 
         if (previous > 0 and previous != index) {
@@ -234,7 +235,7 @@ pub const Exporter = struct {
         const index = if (event.track_index > 0) event.track_index else self.tracks.items.len;
         if (index == 0) return;
         const track = try self.ensureTrack(index, event);
-        const item = try self.appendExpansion(track, event.name, event.semantic);
+        const item = try self.appendExpansion(track, event.name, self.effectiveSemantic(event.semantic));
         const payload = .{
             .track = track.snapshot(self.trajectory_id),
             .expansion = item,
@@ -246,13 +247,14 @@ pub const Exporter = struct {
         const index = if (event.track_index > 0) event.track_index else self.tracks.items.len;
         if (index == 0) return;
         const track = try self.ensureTrack(index, event);
-        const expansion = try self.appendExpansion(track, event.name, event.semantic);
+        const semantic = self.effectiveSemantic(event.semantic);
+        const expansion = try self.appendExpansion(track, event.name, semantic);
         const id = try std.fmt.allocPrint(self.allocator(), "destination-{d}", .{index});
         self.destination = .{
             .id = id,
             .label = event.name,
             .status = if (event.status == .failed) "failed" else "satisfied",
-            .attributes = self.attributes(event.semantic, index, event.track),
+            .attributes = self.attributes(semantic, index, event.track),
         };
         const payload = .{
             .track = track.snapshot(self.trajectory_id),
@@ -271,7 +273,8 @@ pub const Exporter = struct {
             track.status = "running";
             try self.writeEvent("track.started", track.snapshot(self.trajectory_id));
         }
-        const expansion = try self.appendExpansion(track, event.name, event.semantic);
+        const semantic = self.effectiveSemantic(event.semantic);
+        const expansion = try self.appendExpansion(track, event.name, semantic);
         const payload = .{ .track = track.snapshot(self.trajectory_id), .expansion = expansion };
         try self.writeEvent("expansion.recorded", payload);
     }
@@ -317,7 +320,7 @@ pub const Exporter = struct {
                 .started_at = started_at,
                 .sequence = next_index,
                 .started_ns = nowNs(self.io),
-                .attributes = self.attributes(event.semantic, next_index, event.track),
+                .attributes = self.attributes(self.effectiveSemantic(event.semantic), next_index, event.track),
             });
         }
         return &self.tracks.items[index - 1];
@@ -359,10 +362,22 @@ pub const Exporter = struct {
             .fromTrackId = self.tracks.items[from_index - 1].id,
             .toTrackId = self.tracks.items[to_index - 1].id,
             .kind = kind,
-            .attributes = self.attributes(semantic, to_index, self.tracks.items[to_index - 1].name),
+            .attributes = self.attributes(self.effectiveSemantic(semantic), to_index, self.tracks.items[to_index - 1].name),
         };
         try self.relations.append(self.allocator(), relation);
         try self.writeEvent("relation.recorded", relation);
+    }
+
+    fn effectiveSemantic(self: *Exporter, event: trajectory.SemanticContext) trajectory.SemanticContext {
+        return .{
+            .correlation_id = if (event.correlation_id.len > 0) event.correlation_id else self.semantic.correlation_id,
+            .causation_id = if (event.causation_id.len > 0) event.causation_id else self.semantic.causation_id,
+            .actor_type = if (event.actor_type.len > 0) event.actor_type else self.semantic.actor_type,
+            .subject_id = if (event.subject_id.len > 0) event.subject_id else self.semantic.subject_id,
+            .intent_id = if (event.intent_id.len > 0) event.intent_id else self.semantic.intent_id,
+            .behavior_id = if (event.behavior_id.len > 0) event.behavior_id else self.semantic.behavior_id,
+            .action_id = if (event.action_id.len > 0) event.action_id else self.semantic.action_id,
+        };
     }
 
     fn attributes(self: *Exporter, semantic: trajectory.SemanticContext, index: usize, track_name: []const u8) OtdAttributes {
