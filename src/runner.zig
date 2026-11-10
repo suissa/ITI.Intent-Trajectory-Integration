@@ -20,15 +20,18 @@ pub fn runParsed(
     out.emit(.{
         .kind = .trajectory_started,
         .trajectory = trajectory_name,
+        .name = profile_name,
     });
 
-    inline for (spec.steps) |step| {
+    inline for (spec.steps, 0..) |step, index| {
+        const track_index = index + 1;
         const track = trackName(step.kind);
         out.emit(.{
             .kind = .track_started,
             .trajectory = trajectory_name,
             .track = track,
             .name = step.raw,
+            .track_index = track_index,
         });
 
         if (step.kind == .hope or step.kind == .hope_see) {
@@ -38,6 +41,7 @@ pub fn runParsed(
                 .track = track,
                 .name = step.object,
                 .status = .passed,
+                .track_index = track_index,
             });
         } else {
             out.emit(.{
@@ -46,6 +50,7 @@ pub fn runParsed(
                 .track = track,
                 .name = step.raw,
                 .status = .observed,
+                .track_index = track_index,
             });
         }
 
@@ -54,6 +59,7 @@ pub fn runParsed(
             .trajectory = trajectory_name,
             .track = track,
             .status = .passed,
+            .track_index = track_index,
         });
     }
 
