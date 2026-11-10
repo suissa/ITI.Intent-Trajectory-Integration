@@ -231,7 +231,9 @@ pub const Client = struct {
     }
 };
 
-test "CDP command methods use the expected protocol names" {
-    try std.testing.expectEqualStrings("Target.createTarget", "Target.createTarget");
-    try std.testing.expectEqualStrings("Runtime.evaluate", "Runtime.evaluate");
+test "empty CDP params serialize as a JSON object" {
+    const params = std.json.Value{ .object = std.json.ObjectMap.init(std.testing.allocator) };
+    const json = try std.json.Stringify.valueAlloc(std.testing.allocator, params, .{});
+    defer std.testing.allocator.free(json);
+    try std.testing.expectEqualStrings("{}", json);
 }
