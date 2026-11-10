@@ -21,6 +21,12 @@ pub const Client = struct {
             .session_id = "",
         };
 
+        const version = client.command("Browser.getVersion", .{}, null) catch |err| {
+            std.debug.print("ITI CDP Browser.getVersion: {s}\\n", .{@errorName(err)});
+            return err;
+        };
+        version.deinit();
+
         const created = client.command("Target.createTarget", .{ .url = "about:blank" }, null) catch |err| {
             std.debug.print("ITI CDP Target.createTarget: {s}\\n", .{@errorName(err)});
             return err;
