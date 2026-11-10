@@ -471,9 +471,10 @@ pub const Dashboard = struct {
 
         const i = self.emitted_events - base;
         const step_events = 4 * steps.len;
-        const relative_step_event = if (i >= 2) i - 2 else 0;
-        const step_index = if (i >= 2 and relative_step_event < step_events) (relative_step_event / 4) else null;
-        const phase = if (i >= 2 and relative_step_event < step_events) (relative_step_event % 4) else 0;
+        const step_start = 2 + probes_count;
+        const relative_step_event = if (i >= step_start) i - step_start else 0;
+        const step_index = if (i >= step_start and relative_step_event < step_events) (relative_step_event / 4) else null;
+        const phase = if (i >= step_start and relative_step_event < step_events) (relative_step_event % 4) else 0;
 
         if (i == 0) {
             self.log(.info, "RUN", "run_started", entry.name, tui.Color.hex(0xBD93F9));
@@ -481,6 +482,27 @@ pub const Dashboard = struct {
         } else if (i == 1) {
             self.log(.info, "TRJ", "trajectory_started", trajectory_name, tui.Color.hex(0x8BE9FD));
             out.emit(.{ .kind = .trajectory_started, .trajectory = trajectory_name, .name = entry.name });
+        } else if (i >= 2 and i < 2 + probes_count) {
+            const pi = i - 2;
+            const probe = self.probeEventAt(test_index, pi);
+            const label = switch (probe.kind) {
+                .data_probe => "DAT",
+                .benchmark_sample => "PRF",
+                else => "PRB",
+            };
+            var duration_buffer: [64]u8 = undefined;
+            const event_name = if (probe.duration_sample)
+                std.fmt.bufPrint(&duration_buffer, "duration_ms={d}", .{probe.duration_ms}) catch "duration_ms=0"
+            else
+                probe.name;
+            self.log(if (probe.status == .failed) .warn else .action, label, @tagName(probe.kind), event_name, tui.Color.hex(if (probe.status == .failed) 0xFF5555 else 0xFFB86C));
+            out.emit(.{
+                .kind = probe.kind,
+                .trajectory = trajectory_name,
+                .track = probe.track,
+                .name = event_name,
+                .status = probe.status,
+            });
         } else if (step_index) |si| {
             const step = steps[si];
             const track = stepTrack(step.kind);
@@ -558,27 +580,6 @@ pub const Dashboard = struct {
                     });
                 },
             }
-        } else if (i >= 2 + 4 * steps.len and i < 2 + 4 * steps.len + probes_count) {
-            const pi = i - 2 - 4 * steps.len;
-            const probe = self.probeEventAt(test_index, pi);
-            const label = switch (probe.kind) {
-                .data_probe => "DAT",
-                .benchmark_sample => "PRF",
-                else => "PRB",
-            };
-            var duration_buffer: [64]u8 = undefined;
-            const event_name = if (probe.duration_sample)
-                std.fmt.bufPrint(&duration_buffer, "duration_ms={d}", .{probe.duration_ms}) catch "duration_ms=0"
-            else
-                probe.name;
-            self.log(if (probe.status == .failed) .warn else .action, label, @tagName(probe.kind), event_name, tui.Color.hex(if (probe.status == .failed) 0xFF5555 else 0xFFB86C));
-            out.emit(.{
-                .kind = probe.kind,
-                .trajectory = trajectory_name,
-                .track = probe.track,
-                .name = event_name,
-                .status = probe.status,
-            });
         } else if (i == 2 + 4 * steps.len + probes_count) {
             self.log(if (self.run_failed) .warn else .info, "TRJ", "trajectory_finished", trajectory_name, tui.Color.hex(if (self.run_failed) 0xFF5555 else 0x50FA7B));
             out.emit(.{ .kind = .trajectory_finished, .trajectory = trajectory_name, .status = if (self.run_failed) .failed else .passed });
