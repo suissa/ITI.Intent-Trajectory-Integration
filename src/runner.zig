@@ -3,6 +3,7 @@ const dsl = @import("dsl.zig");
 const profile_mod = @import("profile.zig");
 const trajectory = @import("trajectory.zig");
 const browser_mod = @import("browser.zig");
+const data_plane = @import("data_plane.zig");
 
 pub fn runParsed(
     comptime spec: anytype,
@@ -12,6 +13,8 @@ pub fn runParsed(
     sink: ?trajectory.EventSink,
     semantic_context: trajectory.SemanticContext,
     browser: ?*browser_mod.Browser,
+    data_plane_runtime: *data_plane.Runtime,
+    io: std.Io,
 ) !void {
     var out = trajectory.Console{
         .projection = projection,
@@ -96,7 +99,7 @@ pub fn runParsed(
         }
     }
 
-    emitSelectedProbes(&out, profile, trajectory_name);
+    run_failed = emitSelectedProbes(&out, profile, trajectory_name, data_plane_runtime, io, semantic_context) or run_failed;
 
     out.emit(.{
         .kind = .trajectory_finished,
@@ -131,20 +134,37 @@ fn trackName(kind: dsl.StepKind) []const u8 {
     };
 }
 
-fn emitSelectedProbes(out: *trajectory.Console, profile: profile_mod.TestSet, name: []const u8) void {
+fn emitSelectedProbes(
+    out: *trajectory.Console,
+    profile: profile_mod.TestSet,
+    name: []const u8,
+    runtime: *data_plane.Runtime,
+    io: std.Io,
+    semantic: trajectory.SemanticContext,
+) bool {
+    var failed = false;
     if (profile.intent) probe(out, name, "intent.resolve");
     if (profile.unit) probe(out, name, "tests.unit.actions");
     if (profile.integration) probe(out, name, "tests.integration");
     if (profile.e2e) probe(out, name, "tests.e2e.lightpanda");
     if (profile.semantic) probe(out, name, "tests.semantic");
 
-    if (profile.data_write) data(out, name, "data.write");
-    if (profile.data_read) data(out, name, "data.read");
-    if (profile.data_cache) data(out, name, "data.cache");
-    if (profile.data_search) data(out, name, "data.search");
-    if (profile.data_vector) data(out, name, "data.vector");
-    if (profile.data_graph) data(out, name, "data.graph");
-    if (profile.data_events) data(out, name, "data.events");
+    const context = data_plane.ProbeContext{
+        .correlation_id = semantic.correlation_id,
+        .causation_id = semantic.causation_id,
+        .actor_type = semantic.actor_type,
+        .subject_id = semantic.subject_id,
+        .intent_id = semantic.intent_id,
+        .behavior_id = semantic.behavior_id,
+        .action_id = semantic.action_id,
+    };
+    if (profile.data_write) failed = data(out, name, "data.write", .write, runtime, io, context) or failed;
+    if (profile.data_read) failed = data(out, name, "data.read", .read, runtime, io, context) or failed;
+    if (profile.data_cache) failed = data(out, name, "data.cache", .cache, runtime, io, context) or failed;
+    if (profile.data_search) failed = data(out, name, "data.search", .search, runtime, io, context) or failed;
+    if (profile.data_vector) failed = data(out, name, "data.vector", .vector, runtime, io, context) or failed;
+    if (profile.data_graph) failed = data(out, name, "data.graph", .graph, runtime, io, context) or failed;
+    if (profile.data_events) failed = data(out, name, "data.events", .events, runtime, io, context) or failed;
 
     if (profile.benchmark) performance(out, name, "performance.benchmark");
     if (profile.load) performance(out, name, "performance.load");
@@ -152,6 +172,7 @@ fn emitSelectedProbes(out: *trajectory.Console, profile: profile_mod.TestSet, na
 
     if (profile.discovery_graph) probe(out, name, "discovery.graph");
     if (profile.discovery_semantic) probe(out, name, "discovery.semantic");
+    return failed;
 }
 
 fn probe(out: *trajectory.Console, trajectory_name: []const u8, name: []const u8) void {
@@ -172,6 +193,68 @@ fn data(out: *trajectory.Console, trajectory_name: []const u8, name: []const u8)
         .name = "selected",
         .status = .observed,
     });
+}
+
+fn data(
+    out: *trajectory.Console,
+    trajectory_name: []const u8,
+    track: []const u8,
+    capability: data_plane.Capability,
+    runtime: *data_plane.Runtime,
+    io: std.Io,
+    context: data_plane.ProbeContext,
+) bool {
+    const outcomes = runtime.registry.probeAll(capability, io, context) catch |err| {
+        out.emit(.{
+            .kind = .data_probe,
+            .trajectory = trajectory_name,
+            .track = track,
+            .name = @errorName(err),
+            .status = .failed,
+        });
+        return true;
+    };
+    defer runtime.registry.allocator.free(outcomes);
+
+    if (outcomes.len == 0) {
+        const configured = runtime.registry.adapters.items.len > 0;
+        out.emit(.{
+            .kind = .data_probe,
+            .trajectory = trajectory_name,
+            .track = track,
+            .name = if (configured) "no-adapter-supports-capability" else "no-adapter-configured",
+            .status = if (configured) .failed else .observed,
+        });
+        return configured;
+    }
+
+    var failed = false;
+    for (outcomes) |outcome| {
+        const status: trajectory.Status = switch (outcome.result.status) {
+            .passed => .passed,
+            .failed => .failed,
+            .skipped => .observed,
+        };
+        out.emit(.{
+            .kind = .data_probe,
+            .trajectory = trajectory_name,
+            .track = track,
+            .name = outcome.adapter_id,
+            .status = status,
+        });
+
+        var timing_buffer: [64]u8 = undefined;
+        const timing = std.fmt.bufPrint(&timing_buffer, "duration_ms={d}", .{outcome.result.duration_ms}) catch "duration_ms=0";
+        out.emit(.{
+            .kind = .benchmark_sample,
+            .trajectory = trajectory_name,
+            .track = track,
+            .name = timing,
+            .status = .observed,
+        });
+        if (outcome.result.status == .failed) failed = true;
+    }
+    return failed;
 }
 
 fn performance(out: *trajectory.Console, trajectory_name: []const u8, name: []const u8) void {
