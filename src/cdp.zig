@@ -44,6 +44,7 @@ pub const Client = struct {
         if (session_value != .string) return error.InvalidCdpResponse;
         const session = session_value.string;
         client.session_id = try allocator.dupe(u8, session);
+        errdefer allocator.free(client.session_id);
 
         const page_enabled = try client.command("Page.enable", .{}, client.session_id);
         page_enabled.deinit();
