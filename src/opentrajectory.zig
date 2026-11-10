@@ -172,8 +172,6 @@ pub const Exporter = struct {
 
     pub fn emit(self: *Exporter, event: trajectory.Event) trajectory.Event {
         if (!self.enabled) return event;
-        self.sequence = event.sequence;
-
         switch (event.kind) {
             .trajectory_started => self.startTrajectory(event) catch self.reportError("trajectory.started"),
             .track_started => self.startTrack(event) catch self.reportError("track.started"),
@@ -432,6 +430,7 @@ pub const Exporter = struct {
     }
 
     fn writeEvent(self: *Exporter, comptime Payload: type, event_type: []const u8, payload: Payload) !void {
+        self.sequence += 1;
         const event_timestamp = try timestamp(self.allocator());
         const Envelope = struct {
             protocol: []const u8 = "open-trajectory",
