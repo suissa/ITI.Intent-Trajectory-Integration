@@ -59,10 +59,11 @@ pub const WebSocketClient = struct {
     }
 
     pub fn deinit(self: *WebSocketClient) void {
-        if (!self.connected) return;
-        self.sendFrame(0x8, &.{}) catch {};
+        if (self.fd < 0) return;
+        if (self.connected) self.sendFrame(0x8, &.{}) catch {};
         self.connected = false;
         _ = c_close(self.fd);
+        self.fd = -1;
     }
 
     pub fn sendText(self: *WebSocketClient, payload: []const u8) !void {
