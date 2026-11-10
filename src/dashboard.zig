@@ -241,7 +241,7 @@ pub const Dashboard = struct {
         if (self.state == .running) return;
         if (self.state == .paused) {
             self.state = .running;
-            self.last_tick_ns = std.time.nanoTimestamp();
+            self.last_tick_ns = monotonicNowNs();
             self.pushSystem(.running, "execução retomada", .{});
             return;
         }
@@ -250,7 +250,7 @@ pub const Dashboard = struct {
             self.elapsed_ms = 0;
         }
         self.state = .running;
-        self.last_tick_ns = std.time.nanoTimestamp();
+        self.last_tick_ns = monotonicNowNs();
         const entry = self.selected();
         self.pushSystem(.running, "executando '{s}' · perfil {s}", .{ entry.spec_name, entry.profile_name });
     }
@@ -565,7 +565,7 @@ pub const Dashboard = struct {
 
         sub.setStyle(.{ .fg = tui.Color.hex(0x6272A4), .bg = tui.Color.hex(0x282A36) });
         sub.moveCursor(0, 1);
-        sub.hline(0, 1, w, '─');
+        drawHLine(sub, 0, 1, w, '─');
     }
 
     fn renderBody(sub: *tui.screen.SubScreen, self: *Dashboard, w: u16, h: u16) void {
@@ -608,10 +608,10 @@ pub const Dashboard = struct {
         const panel_bottom = body_bottom;
         if (panel_bottom > panel_top) {
             sub.setStyle(.{ .fg = tui.Color.hex(0x6272A4) });
-            sub.hline(1, panel_top, w - 2, '─');
-            sub.hline(1, panel_bottom, w - 2, '─');
-            sub.vline(1, panel_top + 1, panel_bottom - panel_top - 1, '│');
-            sub.vline(w - 2, panel_top + 1, panel_bottom - panel_top - 1, '│');
+            drawHLine(sub, 1, panel_top, w - 2, '─');
+            drawHLine(sub, 1, panel_bottom, w - 2, '─');
+            drawVLine(sub, 1, panel_top + 1, panel_bottom - panel_top - 1, '│');
+            drawVLine(sub, w - 2, panel_top + 1, panel_bottom - panel_top - 1, '│');
 
             const title = " ── LOGS · signale ─────────────────────────── ";
             sub.setStyle(.{ .fg = tui.Color.hex(0xBD93F9), .attrs = .{ .bold = true } });
@@ -731,7 +731,7 @@ pub const Dashboard = struct {
 
         sub.setStyle(.{ .fg = tui.Color.hex(0x6272A4), .bg = tui.Color.hex(0x282A36) });
         sub.moveCursor(0, controls_y);
-        sub.hline(0, controls_y, w, '─');
+        drawHLine(sub, 0, controls_y, w, '─');
 
         // When execution is active, the footer owns the two lifecycle controls.
         if (self.state == .running or self.state == .paused) {
@@ -747,7 +747,7 @@ pub const Dashboard = struct {
 
         sub.setStyle(.{ .fg = tui.Color.hex(0x282A36), .bg = tui.Color.hex(0x44475A) });
         sub.moveCursor(0, bar_y);
-        sub.hline(0, bar_y, w, ' ');
+        drawHLine(sub, 0, bar_y, w, ' ');
 
         const pct = self.progressPercentage();
         var label_buf: [96]u8 = undefined;
@@ -839,7 +839,9 @@ fn drawButton(sub: *tui.screen.SubScreen, x: u16, y: u16, w: u16, label: []const
 
     sub.setStyle(.{ .fg = fg_color, .bg = bg_color, .attrs = .{ .bold = true } });
     sub.moveCursor(x, y);
-    sub.putString("[" ++ label ++ "]");
+    sub.putString("[");
+    sub.putString(label);
+    sub.putString("]");
 }
 
 fn upperInto(src: []const u8, buf: []u8) []u8 {
@@ -861,10 +863,7 @@ fn upper(comptime src: []const u8) []const u8 {
 }
 
 /// Copies `src` into a fixed-size array field, tracking its length.
-fn copyBounded(src: []const u8, comptime buf: anytype, len: anytype) void {
-    comptime {
-        if (@TypeOf(buf).kind() != .pointer) @compileError("copyBounded expects a pointer to an array");
-    }
+fn copyBounded(src: []const u8, buf: anytype, len: anytype) void {
     const n = @min(src.len, buf.len);
     @memcpy(buf[0..n], src[0..n]);
     len.* = @intCast(n);
@@ -1049,4 +1048,22 @@ fn readTerminalInput(buffer: []u8) usize {
     const result = std.posix.system.read(0, buffer.ptr, buffer.len);
     const count: isize = @bitCast(result);
     return if (count > 0) @intCast(count) else 0;
+}
+
+fn drawHLine(sub: *tui.screen.SubScreen, x: u16, y: u16, len: u16, char: u21) void {
+    sub.moveCursor(x, y);
+    for (0..len) |_| sub.putChar(char);
+}
+
+fn drawVLine(sub: *tui.screen.SubScreen, x: u16, y: u16, len: u16, char: u21) void {
+    for (0..len) |offset| {
+        sub.moveCursor(x, y + @as(u16, @intCast(offset)));
+        sub.putChar(char);
+    }
+}
+
+fn monotonicNowNs() i128 {
+    var ts: std.posix.timespec = undefined;
+    _ = std.posix.system.clock_gettime(.MONOTONIC, &ts);
+    return @as(i128, ts.sec) * 1_000_000_000 + ts.nsec;
 }
