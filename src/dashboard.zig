@@ -923,7 +923,7 @@ pub fn run(
     io: std.Io,
 ) !void {
 
-    var term = try tui.terminal.Terminal.init(.{});
+    var term = tui.terminal.Terminal.init();
     defer term.deinit();
 
     const size = try term.getSize();
