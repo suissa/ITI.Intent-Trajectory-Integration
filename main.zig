@@ -52,7 +52,7 @@ pub fn main(init: std.process.Init) !void {
             build_options.spec,
             build_options.profile,
         );
-        try dashboard.run(suite, .tui, sink);
+        try dashboard.run(suite, .tui, sink, init.gpa, init.io);
         return;
     }
 
