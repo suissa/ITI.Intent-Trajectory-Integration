@@ -1010,13 +1010,13 @@ pub fn main(init: std.process.Init) !void {
 
     const parsed_spec = blk: {
         @setEvalBranchQuota(100_000);
-        break :blk dsl.parse(@embedFile(build_options.spec));
+        break :blk dsl.parse(@embedFile("../" ++ build_options.spec));
     };
     const selected_profile = blk: {
         @setEvalBranchQuota(10_000);
         break :blk profile_mod.fromName(build_options.profile);
     };
-    const suite = buildSuite(parsed_spec, selected_profile, build_options.spec, build_options.profile);
+    const suite = buildSuite(parsed_spec.steps, selected_profile, build_options.spec, build_options.profile);
 
     try run(suite, .tui, null);
 }
