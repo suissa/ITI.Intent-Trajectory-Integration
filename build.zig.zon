@@ -5,8 +5,7 @@
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .tui = .{
-            .url = "https://github.com/suissa/ChappieTUI/archive/cab53b0c50e8fc5af8fe28a4338d6c4b369d0d10.tar.gz",
-            .hash = "tui_zig-0.1.0-aTPZNjJsBAA1EU-eqWf9DPEgC_8MX_21a5EuvQiVJCDB",
+            .path = "vendor/tui",
         },
     },
     .paths = .{
