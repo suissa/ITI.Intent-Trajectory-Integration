@@ -437,7 +437,7 @@ pub const Dashboard = struct {
         var line = LogLine{};
         _ = timestampInto(&line.time);
         copyBounded(tag, line.level_tag[0..], &line.tag_len);
-        copyBounded(scope, line.scope[0..], line.scope[0..]_len);
+        copyBounded(scope, line.scope[0..], &line.scope_len);
         var msg_buf: [log_line_len]u8 = undefined;
         const msg = sanitize(message, &msg_buf);
         copyBoundedSlice(msg, &line.message, &line.message_len);
@@ -452,7 +452,7 @@ pub const Dashboard = struct {
         var line = LogLine{};
         _ = timestampInto(&line.time);
         copyBounded(state.badgeTag(), line.level_tag[0..], &line.tag_len);
-        copyBounded("SYS", line.scope[0..], line.scope[0..]_len);
+        copyBounded("SYS", line.scope[0..], &line.scope_len);
         copyBoundedSlice(msg, &line.message, &line.message_len);
         line.color = state.badgeColor();
         line.bold = true;
